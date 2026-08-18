@@ -1,0 +1,66 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Talkie",
+  "version": "0.1.0",
+  "identifier": "com.haakonkohler.talkie",
+  "build": {
+    "beforeDevCommand": "trunk serve",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "trunk build --release",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "editor",
+        "title": "Talkie",
+        "width": 760,
+        "height": 820,
+        "minWidth": 420,
+        "minHeight": 320,
+        "visible": false,
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      },
+      {
+        "label": "settings",
+        "title": "Talkie Settings",
+        "width": 520,
+        "height": 600,
+        "resizable": false,
+        "visible": false,
+        "center": true
+      },
+      {
+        "label": "onboarding",
+        "title": "Welcome to Talkie",
+        "width": 560,
+        "height": 460,
+        "resizable": false,
+        "visible": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Speak, and it lands in your notes.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

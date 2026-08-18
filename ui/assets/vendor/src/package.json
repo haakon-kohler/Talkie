@@ -1,0 +1,17 @@
+{
+  "name": "talkie-cm-bundle",
+  "private": true,
+  "type": "module",
+  "description": "One-time, out-of-repo build of the frozen CodeMirror bundle vendored into Talkie.",
+  "dependencies": {
+    "@codemirror/commands": "^6.11.0",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/search": "^6.7.1",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.9",
+    "@lezer/highlight": "^1.2.3",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "rollup": "^4.62.4"
+  }
+}

@@ -1,0 +1,30 @@
+[package]
+name = "talkie-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Talkie's Leptos (CSR) frontend, compiled to WASM by Trunk."
+
+[dependencies]
+talkie-shared = { workspace = true }
+leptos = { version = "0.8", features = ["csr"] }
+serde = { workspace = true }
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "console",
+  "Document",
+  "Element",
+  "Event",
+  "EventTarget",
+  "HtmlElement",
+  "MediaQueryList",
+  "Window",
+]

@@ -1,0 +1,7 @@
+# Talkie builds for two targets: the host (Tauri) and wasm32 (the Leptos UI).
+# Pinning here makes rustup fetch the wasm target automatically — but only when
+# `cargo` resolves to rustup's shim. If a Homebrew rust shadows it on PATH, the
+# wasm build fails with "can't find crate for `core`". See AGENTS.md.
+[toolchain]
+channel = "stable"
+targets = ["wasm32-unknown-unknown"]

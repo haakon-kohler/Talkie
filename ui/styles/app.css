@@ -1,0 +1,301 @@
+/* Talkie's entire stylesheet. Handwritten on purpose: no framework, no build
+   step beyond Trunk copying this file, and full control of the macOS look. */
+
+:root {
+  --bg: #fdfdfc;
+  --bg-raised: #ffffff;
+  --text: #1d1d1f;
+  --text-muted: #6e6e73;
+  --text-faint: #a1a1a6;
+  --accent: #0a84ff;
+  --border: rgba(0, 0, 0, 0.12);
+  --code-bg: rgba(0, 0, 0, 0.05);
+  --danger: #d70015;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --bg-raised: #2c2c2e;
+    --text: #e8e8ed;
+    --text-muted: #98989d;
+    --text-faint: #6e6e73;
+    --accent: #4a9eff;
+    --border: rgba(255, 255, 255, 0.14);
+    --code-bg: rgba(255, 255, 255, 0.08);
+    --danger: #ff6961;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Overlay scrollbars, the way native macOS views do them. */
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+:hover::-webkit-scrollbar-thumb {
+  background: var(--text-faint);
+  background-clip: content-box;
+}
+
+/* ---------------------------------------------------------------- editor -- */
+
+.editor-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Hidden titlebar: the traffic lights float over this strip, which is also the
+   only place the window can be dragged from. */
+.titlebar {
+  flex: 0 0 auto;
+  height: 38px;
+  background: var(--bg);
+}
+
+.editor-host {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.cm-editor {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-scroller {
+  font-family: var(--font-ui);
+  line-height: 1.65;
+}
+
+.cm-content {
+  max-width: 68ch;
+  margin: 0 auto;
+  padding: 0 28px 45vh;
+  caret-color: var(--accent);
+}
+
+.cm-cursor,
+.cm-dropCursor {
+  border-left-color: var(--text);
+}
+
+.cm-selectionBackground,
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused .cm-selectionBackground {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* CodeMirror's search panel — the one piece of chrome, and only on ⌘F. */
+.cm-panels {
+  background: var(--bg-raised);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-ui);
+}
+.cm-panel input,
+.cm-panel button {
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+/* Markdown tinting. The vendored bundle maps syntax tags to these classes and
+   nothing else, so every color decision lives here. */
+.cm-md-h1,
+.cm-md-h2,
+.cm-md-h3,
+.cm-md-h {
+  font-weight: 600;
+}
+.cm-md-h1 {
+  font-size: 1.5em;
+}
+.cm-md-h2 {
+  font-size: 1.15em;
+  color: var(--text);
+}
+.cm-md-h3 {
+  font-size: 1.05em;
+}
+.cm-md-strong {
+  font-weight: 650;
+}
+.cm-md-em {
+  font-style: italic;
+}
+.cm-md-strike {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+.cm-md-link {
+  color: var(--accent);
+}
+.cm-md-url {
+  color: var(--text-muted);
+  text-decoration: underline;
+}
+.cm-md-code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--code-bg);
+  border-radius: 3px;
+  padding: 0.5px 3px;
+}
+.cm-md-quote {
+  color: var(--text-muted);
+}
+.cm-md-list {
+  color: var(--text);
+}
+.cm-md-hr {
+  color: var(--text-faint);
+}
+/* The literal markup characters (#, *, -, >) stay visible but recede. */
+.cm-md-mark {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+/* ------------------------------------------------- settings & onboarding -- */
+
+.page {
+  padding: 26px 30px;
+  max-width: 520px;
+}
+
+.page h1 {
+  margin: 0 0 18px;
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.lede {
+  font-size: 15px;
+  color: var(--text);
+  margin-top: 0;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.field {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.field-label {
+  display: block;
+  font-weight: 550;
+  margin-bottom: 5px;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+input[type="text"] {
+  width: 100%;
+  padding: 6px 9px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+input[type="text"]:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -1px;
+}
+
+.toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 11px;
+  line-height: 1.4;
+}
+
+.toggle input {
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.status {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+button.primary {
+  font: inherit;
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 16px;
+}
+
+button.primary:active {
+  filter: brightness(0.92);
+}
+
+.unknown-window {
+  padding: 24px;
+  color: var(--text-muted);
+}

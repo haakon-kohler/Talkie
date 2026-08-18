@@ -1,0 +1,6 @@
+# Keep `tauri dev` from rebuilding the Rust host when only the frontend changes.
+/ui
+/shared
+/dist
+/Cargo.toml
+/Trunk.toml
