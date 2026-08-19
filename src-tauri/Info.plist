@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Shown in the macOS microphone prompt. Talkie never pastes into another
+	     app, so the microphone is the only permission it ever asks for. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Talkie records your voice so it can transcribe it into your notes file, entirely on this Mac.</string>
+</dict>
+</plist>

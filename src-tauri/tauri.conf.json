@@ -51,7 +51,7 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "shortDescription": "Speak, and it lands in your notes.",
+    "shortDescription": "The modern notepad.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -61,6 +61,9 @@
     ],
     "macOS": {
       "minimumSystemVersion": "10.15"
-    }
+    },
+    "resources": [
+      "resources/models/silero_vad_v4.onnx"
+    ]
   }
 }

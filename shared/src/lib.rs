@@ -21,6 +21,15 @@ pub mod commands {
     pub const COMPLETE_ONBOARDING: &str = "complete_onboarding";
     pub const SHOW_WINDOW: &str = "show_window";
     pub const HIDE_WINDOW: &str = "hide_window";
+    /// Where the speech model is: missing, downloading, or ready.
+    pub const GET_MODEL_STATUS: &str = "get_model_status";
+    /// Fetch and unpack the speech model, reporting progress as events.
+    pub const DOWNLOAD_MODEL: &str = "download_model";
+    /// Ask the OS for microphone access (first run).
+    pub const REQUEST_MICROPHONE: &str = "request_microphone";
+    /// Start / stop a capture from the UI or the tray, same as the shortcut.
+    pub const TOGGLE_RECORDING: &str = "toggle_recording";
+    pub const GET_RECORDER_STATE: &str = "get_recorder_state";
 }
 
 /// Event names for host → UI pushes. Namespaced so they can never collide with
@@ -30,6 +39,11 @@ pub mod events {
     pub const RECORDER_STATE: &str = "talkie://recorder-state";
     /// The note file changed on disk underneath us (Obsidian, an agent, git…).
     pub const NOTE_CHANGED_EXTERNALLY: &str = "talkie://note-changed-externally";
+    /// Model download progress, payload `ModelProgress`.
+    pub const MODEL_PROGRESS: &str = "talkie://model-progress";
+    /// A capture failed. Payload is a human-readable sentence; the only way an
+    /// otherwise silent pipeline can say something went wrong.
+    pub const CAPTURE_FAILED: &str = "talkie://capture-failed";
 }
 
 /// Every window loads the same WASM bundle and routes on its own label.
@@ -117,4 +131,37 @@ pub struct WindowArgs {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetSettingsArgs {
     pub settings: Settings,
+}
+
+/// Whether the local speech model is on disk yet. Drives the onboarding page and
+/// the recorder's refusal to start without a model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelStatus {
+    Missing,
+    Downloading,
+    Ready,
+}
+
+/// Download progress for the speech model. `total_bytes` is `None` until the
+/// server's `Content-Length` is known.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelProgress {
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    /// Set once the bytes are down and the archive is being unpacked — a step
+    /// slow enough (456 MB) that the UI would otherwise look stalled.
+    pub extracting: bool,
+    pub done: bool,
+    pub error: Option<String>,
+}
+
+impl ModelProgress {
+    pub fn fraction(&self) -> Option<f32> {
+        let total = self.total_bytes?;
+        if total == 0 {
+            return None;
+        }
+        Some(self.downloaded_bytes as f32 / total as f32)
+    }
 }

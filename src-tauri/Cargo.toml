@@ -22,3 +22,20 @@ tauri-plugin-store = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 dirs = "6"
+cpal = "0.16"
+rubato = "0.16.2"
+hound = "3.5"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+chrono = "0.4"
+tar = "0.4"
+flate2 = "1"
+sha2 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
+tauri-plugin-global-shortcut = "2"
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+rodio = "0.21"
+vad-rs = { git = "https://github.com/cjpais/vad-rs", version = "0.1.6", default-features = false }
+transcribe-rs = { version = "0.3.8", features = ["onnx"] }

@@ -3,12 +3,16 @@
 //! M0 proves the round trip: read the host's settings, change them, write them
 //! back, and see them persist across a restart. M3 turns this into the real
 //! form — a shortcut recorder, a file picker, a microphone list.
+//!
+//! Labels are synced from `COPY.md` at the repo root, which is the source of
+//! truth for every user-visible string.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use talkie_shared::{commands, SetSettingsArgs, Settings};
 
 use crate::ipc;
+use crate::model::ModelSection;
 
 #[component]
 pub fn SettingsPage() -> impl IntoView {
@@ -55,9 +59,6 @@ pub fn SettingsPage() -> impl IntoView {
                             settings.update(|s| { if let Some(s) = s { s.note_path = value; } });
                         }
                     />
-                    <span class="field-hint">
-                        "Point this inside an Obsidian vault and the vault indexes it — that is the whole integration."
-                    </span>
                 </label>
 
                 <label class="field">
@@ -70,7 +71,6 @@ pub fn SettingsPage() -> impl IntoView {
                             settings.update(|s| { if let Some(s) = s { s.shortcut = value; } });
                         }
                     />
-                    <span class="field-hint">"Typed for now; a recorder replaces this later."</span>
                 </label>
 
                 <label class="toggle">
@@ -82,7 +82,7 @@ pub fn SettingsPage() -> impl IntoView {
                             settings.update(|s| { if let Some(s) = s { s.push_to_talk = value; } });
                         }
                     />
-                    <span>"Push to talk (hold the shortcut instead of pressing twice)"</span>
+                    <span>"Toggle Push-to-Talk (Push Twice Instead Of Tap-and-Hold)"</span>
                 </label>
 
                 <label class="toggle">
@@ -94,7 +94,7 @@ pub fn SettingsPage() -> impl IntoView {
                             settings.update(|s| { if let Some(s) = s { s.play_sounds = value; } });
                         }
                     />
-                    <span>"Play start and stop chimes"</span>
+                    <span>"Play Sound When Recording Starts/Stops"</span>
                 </label>
 
                 <label class="toggle">
@@ -106,13 +106,22 @@ pub fn SettingsPage() -> impl IntoView {
                             settings.update(|s| { if let Some(s) = s { s.launch_at_login = value; } });
                         }
                     />
-                    <span>"Launch at login"</span>
+                    <span>"Start at Login"</span>
                 </label>
 
                 <div class="actions">
                     <span class="status">{move || status.get()}</span>
                     <button class="primary" on:click=save>"Save"</button>
                 </div>
+
+                <section class="section">
+                    // COPY: settings.model.label
+                    <h2>"Speech model"</h2>
+                    // Onboarding is not the only route to the model: it can be
+                    // skipped, and the directory can go missing later. This is
+                    // the place to get it back.
+                    <ModelSection on_ready=|| {} />
+                </section>
             </Show>
         </div>
     }

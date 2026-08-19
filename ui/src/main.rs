@@ -4,6 +4,7 @@
 mod cm;
 mod editor;
 mod ipc;
+mod model;
 mod onboarding;
 mod settings;
 

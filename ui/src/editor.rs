@@ -13,22 +13,23 @@ use wasm_bindgen::prelude::*;
 
 use crate::cm::Editor;
 
-/// Stands in for talkie.md until M2. Written in the exact shape of the document
-/// contract, so the markdown tinting gets exercised.
+/// Stands in for talkie.md until M2. Lorem ipsum in the exact shape of the
+/// document contract, so the markdown tinting gets exercised; the real sample
+/// text lives in `COPY.md` (`editor.sample`) and is synced in from there.
 const SAMPLE: &str = "\
 # talkie.md
 
 ## 2026-08-18 09:14
-Remember to email Sam about the demo Thursday.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 
 ## 2026-08-18 09:31
-The **document contract** is the whole integration surface: one H2 per capture,
-local time, a blank line before each entry, file ends with a newline. Obsidian
-just indexes this file; an agent just watches it.
+Sed do **eiusmod tempor** incididunt ut labore et dolore magna aliqua. Ut enim ad
+minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea
+commodo consequat.
 
 ## 2026-08-18 09:40
-Nothing here is saved yet — M0 only proves the editor mounts. Type into it and
-watch the console for the change callback.
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu
+fugiat nulla pariatur.
 ";
 
 #[component]

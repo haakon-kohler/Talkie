@@ -34,7 +34,41 @@ Tracking against `talkie_implementation_plan.md`. One checklist per milestone; k
 
 ## M1 — Shortcut → local model → talkie.md
 
-Not started.
+- [x] Port `audio_toolkit` from Handy (cpal capture, FFT resampler, Silero VAD)
+- [x] Bundle `silero_vad_v4.onnx` as a Tauri resource
+- [x] `models.rs`: Parakeet V3 downloader — stream, SHA-256 verify, staged unpack, progress events
+- [x] `transcriber.rs`: lazy `ParakeetModel` load + transcribe
+- [x] `note.rs`: append engine and the document contract (with tests)
+- [x] `recorder.rs`: Idle → Recording → Transcribing state machine
+- [x] `shortcut.rs`: global shortcut, toggle **and** push-to-talk
+- [x] `sounds.rs`: synthesised start/stop chimes
+- [x] Onboarding: mic permission step + model download with progress bar
+- [x] Tray: Record item enabled, tooltip reflects capture state
+- [x] **End-to-end run: download the model, speak, confirm the entry lands**
+
+### M1 notes
+
+- The plan had the Silero VAD model as a second download; Handy ships it as a
+  1.7 MB bundled resource and Talkie now does the same, so first run needs one
+  download instead of two and voice detection works before it finishes.
+- `transcribe-rs` 0.3.8 exposes `onnx::parakeet::ParakeetModel::load` +
+  `transcribe_with`, not the `ParakeetEngine` shape Handy's newer code uses.
+- Chimes are synthesised sine blips (rodio), not shipped audio files: no assets,
+  no licences, and the output stream is opened per chime so the audio device is
+  not held awake between captures.
+- Trimmed out of the port: spectrum visualiser, level/streaming callbacks, the
+  second (streaming) VAD profile, `lang_id.rs`, `text.rs`. Handy's own unit
+  tests for the resampler and recorder came across and pass.
+- Captures under 250 ms of post-VAD audio, and transcriptions that come back
+  empty, are dropped without touching the file.
+- End-to-end pass (2026-08-19) surfaced two fixes: `env_logger` is now
+  initialised (failures were invisible before), and a bad accelerator in the
+  store — `"Command"` typed into the free-text field — left the app with no
+  hotkey. `set_settings` now rejects an unparseable shortcut before persisting,
+  and `shortcut::apply` falls back to `DEFAULT_SHORTCUT` if the stored value
+  won't parse.
+- The Notepad window still shows the sample document by design; the file on
+  disk is the pipeline's output. The editor reads the real file in M2.
 
 ## M2 — The editor
 

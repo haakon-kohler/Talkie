@@ -1,11 +1,17 @@
 //! The menu-bar item. Talkie has no Dock presence, so this is the app's home.
 
-use talkie_shared::WindowLabel;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Runtime};
+use std::sync::Arc;
 
+use talkie_shared::{RecorderState, WindowLabel};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{TrayIcon, TrayIconBuilder};
+use tauri::{AppHandle, Manager, Runtime};
+
+use crate::recorder::Recorder;
 use crate::windows;
+
+/// The tray item's id, so `set_state` can find it again.
+const TRAY_ID: &str = "talkie";
 
 const ID_OPEN_NOTES: &str = "open_notes";
 const ID_RECORD: &str = "record";
@@ -13,10 +19,8 @@ const ID_SETTINGS: &str = "settings";
 const ID_QUIT: &str = "quit";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let open_notes = MenuItem::with_id(app, ID_OPEN_NOTES, "Open Notes", true, None::<&str>)?;
-    // Disabled until the capture pipeline exists (M1). The item is here now so
-    // the menu's shape stops changing under the user later.
-    let record = MenuItem::with_id(app, ID_RECORD, "Record", false, None::<&str>)?;
+    let open_notes = MenuItem::with_id(app, ID_OPEN_NOTES, "Notepad", true, None::<&str>)?;
+    let record = MenuItem::with_id(app, ID_RECORD, "Record", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit Talkie", true, None::<&str>)?;
 
@@ -37,7 +41,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .cloned()
         .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
 
-    TrayIconBuilder::with_id("talkie")
+    TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
         .tooltip("Talkie")
         .menu(&menu)
@@ -53,10 +57,31 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                     eprintln!("talkie: could not open the settings window: {e}");
                 }
             }
+            ID_RECORD => {
+                app.state::<Arc<Recorder>>().toggle();
+            }
             ID_QUIT => app.exit(0),
             _ => {}
         })
         .build(app)?;
 
     Ok(())
+}
+
+/// Reflect the capture state in the menu bar.
+///
+/// v1 has no recording overlay, so the tooltip and the menu item's wording are
+/// the only visible sign that Talkie is listening. A real set of icon variants
+/// is an M3 task, alongside the app icon.
+pub fn set_state<R: Runtime>(app: &AppHandle<R>, state: RecorderState) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+
+    let tooltip = match state {
+        RecorderState::Idle => "Talkie",
+        RecorderState::Recording => "Talkie — recording",
+        RecorderState::Transcribing => "Talkie — transcribing",
+    };
+    let _ = TrayIcon::set_tooltip(&tray, Some(tooltip));
 }

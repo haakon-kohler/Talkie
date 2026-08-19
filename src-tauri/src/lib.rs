@@ -4,24 +4,49 @@
 //! transcribes, and the text is appended to one long markdown file. This module
 //! is the assembly point — the pipeline itself arrives in M1.
 
+mod audio_toolkit;
 mod commands;
+mod models;
+mod note;
+mod recorder;
 mod settings;
+mod shortcut;
+mod sounds;
+mod transcriber;
 mod tray;
 mod windows;
+
+use std::sync::Arc;
 
 use talkie_shared::WindowLabel;
 use tauri::{Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Every failure path reports through `log`; without a backend those lines
+    // vanish and a silent app stays silent about its own bugs.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    shortcut::on_event(app, event.state());
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::set_settings,
             commands::complete_onboarding,
             commands::show_window,
             commands::hide_window,
+            commands::get_model_status,
+            commands::download_model,
+            commands::request_microphone,
+            commands::toggle_recording,
+            commands::get_recorder_state,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -30,7 +55,15 @@ pub fn run() {
             let first_run = !settings.onboarding_complete;
             commands::manage_settings(&handle, settings);
 
+            handle.manage(Arc::new(recorder::Recorder::new(handle.clone())));
+
             tray::build(&handle)?;
+
+            // A bad accelerator in the store must not stop the app from
+            // starting: log it and let the tray still drive captures.
+            if let Err(e) = shortcut::apply(&handle) {
+                eprintln!("talkie: {e:#}");
+            }
 
             // Menu-bar app: no Dock icon until a window is actually shown.
             #[cfg(target_os = "macos")]
