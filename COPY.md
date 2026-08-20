@@ -38,16 +38,35 @@ Footnote (`onboarding.note`) — *placeholder*
 
 > 
 
-First run now runs in three steps, and the page shows one at a time: grant the
-microphone, download the model, then finish. The lede and body above sit at the
-top of all three.
+First run now runs in four steps, and the page shows one at a time: grant
+Accessibility, grant the microphone, download the model, then finish. The lede
+and body above sit at the top of all four. The Accessibility step skips itself
+when the permission is already granted.
 
-### Step 1 — microphone
+### Step 1 — accessibility
+
+The settings window mounts this same block, and both hide it when the
+permission is already in place. Onboarding runs once, but macOS drops the grant
+whenever the binary changes, so settings has to be able to ask for it too.
+
+Body (`onboarding.accessibility.body`) — *placeholder*
+
+*The job of this string: macOS gates system-wide key listening behind
+Accessibility, so Talkie cannot hear its own shortcut without it — and a
+shortcut that is only a held modifier is impossible without it. Worth saying
+that Talkie still never types into other apps.*
+
+> 
+
+Button (`onboarding.accessibility.cta`) — *placeholder*
+
+> Allow Accessibility
+
+### Step 2 — microphone
 
 Body (`onboarding.microphone.body`) — *placeholder*
 
-> Talkie needs the microphone, and nothing else. It never types into other apps,
-> so macOS never asks for accessibility.
+> Talkie needs the microphone, and nothing else.
 
 Button (`onboarding.microphone.cta`) — *placeholder*
 
@@ -58,7 +77,7 @@ Denied-permission error (`onboarding.microphone.denied`) — *live*
 > macOS denied the microphone. Open System Settings › Privacy & Security ›
 > Microphone and switch Talkie on.
 
-### Step 2 — the speech model
+### Step 3 — the speech model
 
 Body (`onboarding.model.body`) — *placeholder*
 
@@ -76,7 +95,7 @@ Progress labels — *live*
 | `onboarding.model.unpacking` | Unpacking… |
 | `onboarding.model.ready` | Ready. |
 
-### Step 3 — finish
+### Step 4 — finish
 
 Body (`onboarding.done.body`) — *placeholder*
 
@@ -121,6 +140,22 @@ Label (`settings.shortcut.label`) — *live*
 Hint (`settings.shortcut.hint`) — *placeholder*
 
 > 
+
+Empty state, when nothing is bound (`settings.shortcut.empty`) — *placeholder*
+
+> None
+
+While recording, before any key is down (`settings.shortcut.recording`) — *placeholder*
+
+> Press keys…
+
+Refused because it has no modifier (`settings.shortcut.invalid`) — *placeholder*
+
+> A shortcut needs at least one modifier — ⌘, ⌥, ⌃ or ⇧.
+
+The field records rather than reads: click it, press the combination, and it
+saves itself when every key comes back up. Escape cancels. A held modifier on
+its own (right ⌘) is a legal shortcut and keeps its side.
 
 ### Toggles
 

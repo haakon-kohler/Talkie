@@ -1,8 +1,9 @@
 //! The settings window.
 //!
-//! M0 proves the round trip: read the host's settings, change them, write them
-//! back, and see them persist across a restart. M3 turns this into the real
-//! form — a shortcut recorder, a file picker, a microphone list.
+//! M0 proved the round trip: read the host's settings, change them, write them
+//! back, and see them persist across a restart. M1.5 replaced the free-text
+//! accelerator with a real recorder; a file picker and a microphone list are
+//! still M3.
 //!
 //! Labels are synced from `COPY.md` at the repo root, which is the source of
 //! truth for every user-visible string.
@@ -11,8 +12,10 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use talkie_shared::{commands, SetSettingsArgs, Settings};
 
+use crate::accessibility::AccessibilitySection;
 use crate::ipc;
 use crate::model::ModelSection;
+use crate::shortcut::ShortcutField;
 
 #[component]
 pub fn SettingsPage() -> impl IntoView {
@@ -61,17 +64,14 @@ pub fn SettingsPage() -> impl IntoView {
                     />
                 </label>
 
-                <label class="field">
-                    <span class="field-label">"Shortcut"</span>
-                    <input
-                        type="text"
-                        prop:value=move || settings.get().map(|s| s.shortcut).unwrap_or_default()
-                        on:input=move |ev| {
-                            let value = event_target_value(&ev);
-                            settings.update(|s| { if let Some(s) = s { s.shortcut = value; } });
-                        }
-                    />
-                </label>
+                // Records and saves itself the moment the keys come up, so it
+                // is deliberately outside the Save button's remit.
+                <ShortcutField settings=settings />
+
+                // Renders nothing while the permission is in place. It has to
+                // be here and not only in onboarding: onboarding runs once,
+                // but macOS drops the grant whenever the binary changes.
+                <AccessibilitySection on_ready=|| {} />
 
                 <label class="toggle">
                     <input

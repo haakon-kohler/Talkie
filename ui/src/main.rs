@@ -1,12 +1,14 @@
 //! One WASM bundle, three windows. Each window asks Tauri for its own label and
 //! renders the surface that belongs to it.
 
+mod accessibility;
 mod cm;
 mod editor;
 mod ipc;
 mod model;
 mod onboarding;
 mod settings;
+mod shortcut;
 
 use leptos::prelude::*;
 use talkie_shared::WindowLabel;

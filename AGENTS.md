@@ -51,17 +51,20 @@ Cargo.toml        workspace: shared · ui · src-tauri   (release profile lives 
 Trunk.toml        builds ui/index.html → dist/
 shared/           serde types + command/event names used by BOTH sides
 ui/               Leptos CSR crate (wasm32)
-  src/main.rs       mount; routes on the Tauri window label
-  src/ipc.rs        ~90-line typed invoke/listen shim over window.__TAURI__
-  src/cm.rs         typed wasm-bindgen wrapper over the vendored CodeMirror bundle
-  src/editor.rs     the zero-chrome editor
-  src/settings.rs   settings form
-  src/onboarding.rs first run
-  assets/vendor/    frozen codemirror.bundle.js + its build inputs and README
-  styles/app.css    the entire stylesheet, handwritten
+  src/main.rs          mount; routes on the Tauri window label
+  src/ipc.rs           ~90-line typed invoke/listen shim over window.__TAURI__
+  src/cm.rs            typed wasm-bindgen wrapper over the vendored CodeMirror bundle
+  src/editor.rs        the zero-chrome editor
+  src/settings.rs      settings form
+  src/shortcut.rs      the click-and-press shortcut recorder
+  src/accessibility.rs the Accessibility grant — settings AND onboarding mount it
+  src/onboarding.rs    first run
+  assets/vendor/       frozen codemirror.bundle.js + its build inputs and README
+  styles/app.css       the entire stylesheet, handwritten
 src-tauri/src/
   lib.rs            setup: plugins, state, tray, windows, close-to-hide
   commands.rs       every command the webview can call
+  shortcut.rs       handy-keys engine thread: the global hotkey + the recorder
   settings.rs       tauri-plugin-store; the host owns settings, the UI never caches them
   windows.rs        show/hide + the macOS Accessory/Regular Dock dance
   tray.rs           menu-bar item and its menu
@@ -88,6 +91,30 @@ src-tauri/src/
   rejects wasm-bindgen's `memory.copy` with `Fatal: error validating input`. The
   explicit `--enable-bulk-memory --enable-reference-types
   --enable-nontrapping-float-to-int` is what lets `cargo tauri build` finish.
+- **The hotkey engine is `handy-keys`, not a Tauri plugin.** It owns a
+  `Receiver`, so it is not `Sync` and lives on its own thread behind a channel —
+  never in managed state. The reason for the swap is that Carbon hotkeys cannot
+  express a side-specific modifier (right ⌘) or a modifier-only shortcut, and
+  Talkie's shortcut is meant to be recorded by pressing it. The price is macOS
+  **Accessibility permission**, which the app now asks for in onboarding; the
+  earlier "no accessibility permission" stance is gone. Talkie still never types
+  into another app.
+- **`cargo tauri dev` cannot hold the Accessibility grant.** The dev binary is a
+  bare executable with no `Info.plist` and no bundle id, launched as a child of
+  the terminal, so macOS attributes the request to the terminal and adding
+  `target/debug/talkie` to the pane does nothing. Test the hotkey against a
+  bundle instead:
+
+  ```sh
+  cargo tauri build --debug --bundles app
+  codesign --force --deep --sign - target/debug/bundle/macos/Talkie.app
+  open target/debug/bundle/macos/Talkie.app
+  ```
+
+  The `codesign` step matters: Tauri leaves the bundle linker-signed with its
+  `Info.plist` unbound, which gives TCC nothing stable to key on. After it, the
+  identity is `com.haakonkohler.talkie`. The grant still dies on each rebuild
+  (the code hash changes) — remove the row and re-add it.
 - **The document contract is public API.** One H2 per capture, local time, blank
   line before each entry, file ends with a newline. Changing it breaks Obsidian
   setups and any agent watching the file.

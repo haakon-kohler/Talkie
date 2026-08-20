@@ -29,13 +29,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    shortcut::on_event(app, event.state());
-                })
-                .build(),
-        )
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::set_settings,
@@ -47,6 +40,11 @@ pub fn run() {
             commands::request_microphone,
             commands::toggle_recording,
             commands::get_recorder_state,
+            commands::start_shortcut_recording,
+            commands::stop_shortcut_recording,
+            commands::get_accessibility,
+            commands::open_accessibility_settings,
+            commands::retry_shortcut,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -59,10 +57,13 @@ pub fn run() {
 
             tray::build(&handle)?;
 
-            // A bad accelerator in the store must not stop the app from
-            // starting: log it and let the tray still drive captures.
+            shortcut::init(&handle);
+            // Neither a bad accelerator nor a missing Accessibility grant may
+            // stop the app from starting: log it and let the tray still drive
+            // captures. On first run the grant arrives during onboarding, and
+            // `apply` runs again once it does.
             if let Err(e) = shortcut::apply(&handle) {
-                eprintln!("talkie: {e:#}");
+                log::warn!("talkie: {e:#}");
             }
 
             // Menu-bar app: no Dock icon until a window is actually shown.

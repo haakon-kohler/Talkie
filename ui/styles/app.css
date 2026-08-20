@@ -72,6 +72,7 @@ body {
 
 /* ---------------------------------------------------------------- editor -- */
 
+
 .editor-window {
   display: flex;
   flex-direction: column;
@@ -249,6 +250,34 @@ input[type="text"] {
 input[type="text"]:focus {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: -1px;
+}
+
+/* The shortcut recorder. It looks like the text field it replaced — same box,
+   same metrics — so the settings form reads as one column of inputs rather than
+   a form with a button loose in it. */
+.shortcut-field {
+  width: 100%;
+  padding: 6px 9px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.shortcut-field.recording {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -1px;
+  cursor: default;
+}
+
+/* Only ever on screen when the permission is missing, in either window. */
+.accessibility-section {
+  margin: 0 0 16px;
 }
 
 .toggle {

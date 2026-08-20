@@ -23,7 +23,7 @@ Known costs, accepted with eyes open:
 | Mic capture, device enum, resampling, VAD | Handy's `src-tauri/src/audio_toolkit/` | Self-contained module (cpal 0.16, rubato 0.16.2, vad-rs). MIT — port with copyright notice retained. |
 | Local ASR (Parakeet V3) | `transcribe-rs = "0.3.8"`, `features=["onnx"]` | Same crate Handy uses: `engines::parakeet::{ParakeetModel, ParakeetParams}`. Pure ONNX — **no whisper.cpp, no cmake**. |
 | Model files | `https://blob.handy.computer/parakeet-v3-int8.tar.gz` (extracts to `parakeet-tdt-0.6b-v3-int8/`) + `silero_vad_v4.onnx` | Same URLs as Handy's catalog. Mirror before public distribution. |
-| Global shortcut | `tauri-plugin-global-shortcut 2.3.1` | Pressed/Released → toggle **and** push-to-talk. **No accessibility permission** (Talkie never pastes); mic permission only. |
+| Global shortcut | `handy-keys 0.3.4` | Pressed/Released → toggle **and** push-to-talk. Side-specific modifiers (right ⌘) and modifier-only hotkeys, neither of which Carbon's `RegisterEventHotKey` — and so `tauri-plugin-global-shortcut` — can express. **Needs macOS Accessibility** (M1.5 reversed the original no-accessibility stance); mic permission too. |
 | Feedback sounds | rodio + Handy's chime approach | Start/stop chimes are the "did it hear me?" signal in the silent flow. |
 
 Deliberately omitted vs Handy: paste/accessibility, whisper.cpp models, LLM post-processing, history database (the md file *is* the history), i18n (v1 English), recording overlay (v1: tray icon state + chimes).
@@ -56,7 +56,7 @@ talkie/                         ← new sibling repo (cargo workspace)
     ├── models.rs               # downloader: parakeet tar.gz + silero onnx, progress, checksum
     ├── recorder.rs             # state machine: Idle → Recording → Transcribing
     ├── note.rs                 # append engine + entry formatting + notify file watcher
-    ├── shortcut.rs             # global-shortcut wiring (toggle + PTT)
+    ├── shortcut.rs             # handy-keys engine thread: binding (toggle + PTT) + the recorder
     ├── tray.rs                 # icon states; menu: Open Notes · Record · Settings · Quit
     └── settings.rs             # tauri-plugin-store; settings live backend-side, UI reads/writes via commands
 ```

@@ -50,8 +50,11 @@ into a document. Keep both: their default shortcuts are distinct (Talkie
 defaults to ⌃⌥Space, clear of Handy's ⌥Space and ⌥⇧Space), and macOS lets both
 hold the microphone.
 
-Talkie needs microphone permission only. It never types into other apps, so it
-never asks for accessibility permission.
+Talkie needs two permissions: the microphone, and Accessibility. Accessibility
+is what lets it hear its own shortcut while another app is in front, and it is
+the only way a shortcut can be a *held modifier* — right ⌘ and nothing else —
+rather than a Carbon-style combination. Talkie still never types into another
+app; that stays Handy's job.
 
 ## Built with
 

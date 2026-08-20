@@ -1,15 +1,14 @@
 //! Every command the webview can call. Names come from `talkie_shared::commands`
 //! so the two sides can never drift apart silently.
 
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use talkie_shared::{events, ModelStatus, RecorderState, Settings, WindowLabel};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_global_shortcut::Shortcut;
 
 use crate::recorder::Recorder;
 use crate::settings::{self, SettingsState};
+use crate::shortcut::ShortcutState;
 use crate::{models, shortcut, windows};
 
 #[tauri::command]
@@ -23,14 +22,10 @@ pub fn set_settings(
     state: State<'_, SettingsState>,
     settings: Settings,
 ) -> Result<(), String> {
-    // Refuse a bad accelerator before anything is persisted: this command is
-    // the store's only writer, and a saved-but-invalid shortcut would leave
-    // every later launch without a hotkey. Empty is allowed — it means
-    // "captures from the tray only", same as in `shortcut::apply`.
-    if !settings.shortcut.trim().is_empty() {
-        Shortcut::from_str(&settings.shortcut)
-            .map_err(|e| format!("`{}` is not a valid shortcut: {e}", settings.shortcut))?;
-    }
+    // Refuse an unbindable accelerator before anything is persisted: this
+    // command is the store's only writer, and a saved-but-invalid shortcut would
+    // leave every later launch without a hotkey.
+    shortcut::validate(&settings.shortcut)?;
 
     let shortcut_changed = {
         let mut guard = state.0.lock().expect("settings mutex poisoned");
@@ -127,6 +122,44 @@ pub fn toggle_recording(recorder: State<'_, Arc<Recorder>>) {
 #[tauri::command]
 pub fn get_recorder_state(recorder: State<'_, Arc<Recorder>>) -> RecorderState {
     recorder.state()
+}
+
+/// Put the hotkey engine into recording mode.
+///
+/// The live binding is released for the duration, so the user can press the
+/// shortcut they already have without starting a capture, and raw key events
+/// arrive in the UI as `SHORTCUT_CAPTURE`.
+#[tauri::command]
+pub fn start_shortcut_recording(state: State<'_, ShortcutState>) -> Result<(), String> {
+    state.start_recording()
+}
+
+/// Leave recording mode and re-bind whatever settings now hold.
+#[tauri::command]
+pub fn stop_shortcut_recording(state: State<'_, ShortcutState>) -> Result<(), String> {
+    state.stop_recording()
+}
+
+/// Whether macOS has granted Accessibility, which the event tap behind every
+/// global shortcut needs.
+#[tauri::command]
+pub fn get_accessibility() -> bool {
+    shortcut::accessibility_granted()
+}
+
+#[tauri::command]
+pub fn open_accessibility_settings() -> Result<(), String> {
+    shortcut::open_accessibility_settings()
+}
+
+/// Bind the shortcut again.
+///
+/// The hotkey engine builds its event tap lazily and retries on every bind, so
+/// this is all it takes to come back from a start-up where Accessibility had not
+/// been granted yet — no restart, no reinstall.
+#[tauri::command]
+pub fn retry_shortcut(app: AppHandle) -> Result<(), String> {
+    shortcut::apply(&app).map_err(|e| format!("{e:#}"))
 }
 
 /// Convenience for `lib.rs`: seed the managed state at startup.
