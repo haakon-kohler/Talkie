@@ -92,11 +92,6 @@ src-tauri/src/
   (`talkie_shared::WindowLabel`).
 - **The editor has no chrome.** No toolbar, no buttons, no status bar. If a
   feature needs a button, it probably does not belong in v1.
-- **`data-wasm-opt-params` in `ui/index.html` is load-bearing.** Release builds
-  only: `wasm-opt` 123 validates its input against MVP unless told otherwise and
-  rejects wasm-bindgen's `memory.copy` with `Fatal: error validating input`. The
-  explicit `--enable-bulk-memory --enable-reference-types
-  --enable-nontrapping-float-to-int` is what lets `cargo tauri build` finish.
 - **The hotkey engine is `handy-keys`, not a Tauri plugin.** It owns a
   `Receiver`, so it is not `Sync` and lives on its own thread behind a channel —
   never in managed state. The reason for the swap is that Carbon hotkeys cannot
@@ -121,11 +116,19 @@ src-tauri/src/
   `Info.plist` unbound, which gives TCC nothing stable to key on. After it, the
   identity is `com.haakonkohler.talkie`. The grant still dies on each rebuild
   (the code hash changes) — remove the row and re-add it.
+- **`data-wasm-opt-params` in `ui/index.html` is load-bearing.** Release builds
+  only: `wasm-opt` 123 validates its input against MVP unless told otherwise and
+  rejects wasm-bindgen's `memory.copy` with `Fatal: error validating input`. The
+  explicit `--enable-bulk-memory --enable-reference-types
+  --enable-nontrapping-float-to-int` is what lets `cargo tauri build` finish.
 - **The editor is never the only writer.** Captures go into `talkie.md` while
   the editor may be open with unsaved edits, and Obsidian may be in the file too.
   Saves go through `document::reconcile`, which carries an external capture over
   into the editor's text and refuses anything it cannot merge. Do not "simplify"
   that back into a plain write.
+- **`PROGRESS.md` keeps no backlog.** Track the current milestone and the next
+  one. Do not add a "later" section, and do not reinstate one you find deleted —
+  deferred work either comes back on its own or was never worth listing.
 - **The document contract is public API.** One H2 per capture, local time,
   **newest first**, blank line between entries, file ends with a newline, and
   insertion happens below any YAML frontmatter and any leading `#` title.

@@ -16,6 +16,21 @@ Conventions:
 
 ---
 
+## Still to write
+
+The slots below are the only ones still showing lorem ipsum or nothing at all.
+Everything else in this file is in the app verbatim.
+
+| ID | Where it shows | Note |
+| --- | --- | --- |
+| `onboarding.model.installed` | Under "Speech model", once the model is on disk | In **settings** this is the only thing that section ever says, so it carries more weight than its length suggests |
+| `editor.trouble` | Bottom-right of the editor, only when a save failed | Currently the host's raw error text |
+| `onboarding.note` | Footnote under the first-run body | Empty, and nothing renders it yet |
+| `settings.note_path.hint` | Under the notes-file field | Empty |
+| `settings.shortcut.hint` | Under the shortcut field | Empty |
+
+---
+
 ## Onboarding window
 
 Window title (`onboarding.window_title`) — *live*
@@ -49,41 +64,36 @@ The settings window mounts this same block, and both hide it when the
 permission is already in place. Onboarding runs once, but macOS drops the grant
 whenever the binary changes, so settings has to be able to ask for it too.
 
-Body (`onboarding.accessibility.body`) — *placeholder*
+Body (`onboarding.accessibility.body`) — *live*
 
-*The job of this string: macOS gates system-wide key listening behind
-Accessibility, so Talkie cannot hear its own shortcut without it — and a
-shortcut that is only a held modifier is impossible without it. Worth saying
-that Talkie still never types into other apps.*
+> This setting allows Talkie to use specific modifier keys as your shortcut button (like the right Option key). We don't look at any information in other apps. 
 
-> 
-
-Button (`onboarding.accessibility.cta`) — *placeholder*
+Button (`onboarding.accessibility.cta`) — *live*
 
 > Allow Accessibility
 
 ### Step 2 — microphone
 
-Body (`onboarding.microphone.body`) — *placeholder*
+Body (`onboarding.microphone.body`) — *live*
 
-> Talkie needs the microphone, and nothing else.
+> Talkie needs the microphone to record voice notes.
 
-Button (`onboarding.microphone.cta`) — *placeholder*
+Button (`onboarding.microphone.cta`) — *live*
 
 > Allow Microphone
 
 Denied-permission error (`onboarding.microphone.denied`) — *live*
 
-> macOS denied the microphone. Open System Settings › Privacy & Security ›
-> Microphone and switch Talkie on.
+> Microphone permission denied. Open System Settings › Privacy & Security ›
+> Microphone and enable microphone access for Talkie.
 
 ### Step 3 — the speech model
 
-Body (`onboarding.model.body`) — *placeholder*
+Body (`onboarding.model.body`) — *live*
 
-> Parakeet V3 runs entirely on this Mac. It is a 456 MB download, once.
+> The voice transcription model, Parakeet V3, runs locally, so your data stays on your device.
 
-Button (`onboarding.model.cta`) — *placeholder*. Reads "Downloading…" while busy.
+Button (`onboarding.model.cta`) — *live*. Reads "Downloading…" while busy.
 
 > Download Model
 
@@ -93,13 +103,19 @@ Progress labels — *live*
 | --- | --- |
 | `onboarding.model.progress` | 123 of 456 MB |
 | `onboarding.model.unpacking` | Unpacking… |
-| `onboarding.model.ready` | Ready. |
+| `onboarding.model.ready` | Finished. |
+
+Installed state (`onboarding.model.installed`) — *placeholder*. Shown in place of
+the download button once the model is on disk — in settings too, where it is the
+only thing that section says.
+
+> 
 
 ### Step 4 — finish
 
-Body (`onboarding.done.body`) — *placeholder*
+Body (`onboarding.done.body`) — *live*
 
-> That's everything. Press ⌃⌥Space anywhere and start talking.
+> All set! Use the default shortcut ⌃⌥Space and record your first note.
 
 Primary button (`onboarding.cta`) — *live*
 
@@ -141,15 +157,15 @@ Hint (`settings.shortcut.hint`) — *placeholder*
 
 > 
 
-Empty state, when nothing is bound (`settings.shortcut.empty`) — *placeholder*
+Empty state, when nothing is bound (`settings.shortcut.empty`) — *live*
 
 > None
 
-While recording, before any key is down (`settings.shortcut.recording`) — *placeholder*
+While recording, before any key is down (`settings.shortcut.recording`) — *live*
 
 > Press keys…
 
-Refused because it has no modifier (`settings.shortcut.invalid`) — *placeholder*
+Refused because it has no modifier (`settings.shortcut.invalid`) — *live*
 
 > A shortcut needs at least one modifier — ⌘, ⌥, ⌃ or ⇧.
 
@@ -159,9 +175,12 @@ its own (right ⌘) is a legal shortcut and keeps its side.
 
 ### Toggles
 
-`settings.push_to_talk.label` — *live*
+`settings.push_to_talk.label` — *live*. The control is **inverted**: push-to-talk
+is the default, so this box is the way out of it and ships unchecked. The stored
+setting is still `push_to_talk`; only the checkbox reads backwards, which is why
+the label says "Turn Off".
 
-> Toggle Push-to-Talk (Push Twice Instead Of Tap-and-Hold )
+> Turn Off Push-to-Talk (Toggle Record)
 
 `settings.play_sounds.label` — *live*
 
@@ -217,7 +236,7 @@ All *live*, emitted on `talkie://capture-failed`.
 
 | ID | Text |
 | --- | --- |
-| `capture.no_model` | the speech model is not installed yet — finish first run to download it |
+| `capture.no_model` | speech model not yet installed — finish first run to download it |
 | `capture.no_microphone_permission` | Talkie needs microphone access — grant it in System Settings › Privacy & Security › Microphone |
 | `capture.no_microphone` | no microphone is available |
 
@@ -249,8 +268,7 @@ Menu items — *live*
 macOS microphone prompt (`system.microphone_usage`) — *live*. Lives in
 `src-tauri/Info.plist`, not in the Rust or the UI.
 
-> Talkie records your voice so it can transcribe it into your notes file,
-> entirely on this Mac.
+> Talkie records your voice so it can locally transcribe it into your notes file.
 
 ---
 
@@ -272,4 +290,4 @@ stays real rather than lorem)
 `app.unknown_window` — *live*. Only reachable if a window is created without a
 matching label.
 
-> Unknown window.
+> Error: unknown window.

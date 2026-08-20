@@ -39,8 +39,8 @@ pub fn OnboardingPage() -> impl IntoView {
                 Ok(true) => step.set(Step::Model),
                 // COPY: onboarding.microphone.denied
                 Ok(false) => error.set(
-                    "macOS denied the microphone. Open System Settings › Privacy & Security › \
-                     Microphone and switch Talkie on."
+                    "Microphone permission denied. Open System Settings › Privacy & Security › \
+                     Microphone and enable microphone access for Talkie."
                         .to_string(),
                 ),
                 Err(e) => error.set(e),
@@ -91,11 +91,8 @@ pub fn OnboardingPage() -> impl IntoView {
             </Show>
 
             <Show when=move || step.get() == Step::Microphone>
-                // COPY: onboarding.microphone.body — placeholder
-                <p class="muted">
-                    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
-                    incididunt ut labore."
-                </p>
+                // COPY: onboarding.microphone.body
+                <p class="muted">"Talkie needs the microphone to record voice notes."</p>
                 <div class="actions">
                     <span class="status error">{move || error.get()}</span>
                     <button
@@ -103,7 +100,7 @@ pub fn OnboardingPage() -> impl IntoView {
                         prop:disabled=move || busy.get()
                         on:click=grant_microphone
                     >
-                        // COPY: onboarding.microphone.cta — placeholder
+                        // COPY: onboarding.microphone.cta
                         "Allow Microphone"
                     </button>
                 </div>
@@ -114,9 +111,9 @@ pub fn OnboardingPage() -> impl IntoView {
             </Show>
 
             <Show when=move || step.get() == Step::Done>
-                // COPY: onboarding.done.body — placeholder
+                // COPY: onboarding.done.body
                 <p class="muted">
-                    "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore."
+                    "All set! Use the default shortcut ⌃⌥Space and record your first note."
                 </p>
                 <div class="actions">
                     <span class="status error">{move || error.get()}</span>

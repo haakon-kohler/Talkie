@@ -110,15 +110,16 @@ where
     view! {
         <Show when=move || granted.get() == Some(false)>
             <div class="accessibility-section">
-                // COPY: onboarding.accessibility.body — placeholder
+                // COPY: onboarding.accessibility.body
                 <p class="muted">
-                    "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia
-                    deserunt mollit anim id est laborum."
+                    "This setting allows Talkie to use specific modifier keys as your shortcut
+                    button (like the right Option key). We don't look at any information in
+                    other apps."
                 </p>
                 <div class="actions">
                     <span class="status error">{move || error.get()}</span>
                     <button class="primary" on:click=grant>
-                        // COPY: onboarding.accessibility.cta — placeholder
+                        // COPY: onboarding.accessibility.cta
                         "Allow Accessibility"
                     </button>
                 </div>

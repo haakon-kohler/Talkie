@@ -2,6 +2,12 @@
 
 Tracking against `talkie_implementation_plan.md`. One checklist per milestone; keep it current.
 
+**No backlog.** Only the milestone being built and the one after it are tracked
+here. Work that is genuinely deferred does not get a holding pen — if it matters
+it will come back on its own, and if it does not, a list of it was never worth
+maintaining. Notes explaining why something *shipped the way it did*, or what a
+finished milestone knowingly left rough, are not a backlog and do belong.
+
 ## M0 — Scaffold
 
 - [x] Rename Handy clone → `0 - Projects/Handy/`; new workspace at `0 - Projects/Talkie/`
@@ -208,9 +214,74 @@ every file written in the old order is one more file with a seam in it.
   existing selection through the insertion, so someone mid-sentence when a
   capture lands keeps their place.
 
+## M2.6 — Push-to-talk by default, and the first copy resync
+
+- [x] `Settings::default()` ships `push_to_talk: true`
+- [x] Every string the user rewrote in `COPY.md` copied into the app verbatim
+- [x] `COPY.md` markers corrected to describe what the app actually shows
+- [x] The push-to-talk checkbox inverted: it is now the way *out* of the default
+- [x] `COPY.md` carries a "Still to write" table — the only slots left on lorem
+
+### M2.6 notes
+
+- The flipped default only reaches a *fresh* install. `push_to_talk: false` is
+  already persisted in every existing `settings.json`, and serde fills in
+  defaults only for absent fields — so this machine keeps toggle mode until the
+  box is ticked in settings, or the store is deleted.
+- The push-to-talk checkbox is inverted: the stored field is still
+  `push_to_talk`, but the control shows its negation, so the box ships unchecked
+  and means "turn this off". A checkbox for the default state would have shipped
+  pre-ticked, which reads as a setting someone else already changed.
+- Two strings were missed on the first resync pass — `capture.no_model` and the
+  macOS microphone prompt in `Info.plist`. Both are now verbatim. The prompt is
+  the one string that lives outside the Rust and the UI, which is exactly why it
+  was overlooked; `COPY.md` says so next to it.
+- One string had no ID: the line the model section shows once the model is
+  installed. Added as `onboarding.model.installed`, still lorem, awaiting text.
+
 ## M3 — Settings & robustness
 
-Not started.
+Not started. Planned scope, from the implementation plan plus decisions since:
+
+- [ ] **Bold and italic from the keyboard.** ⌘B / ⌘I wrap the selection (or open
+      an empty pair at the cursor) and unwrap it again when the selection is
+      already wrapped. No toolbar, no menu, no hint in the UI — the shortcuts are
+      simply there, the way they are in every other editor. No ⌘U: CommonMark has
+      no underline (`__text__` is bold), and inventing an HTML `<u>` tag would
+      put markup in `talkie.md` that plain-text readers see raw.
+
+      This is the item that touches the frozen `codemirror.bundle.js`: a keymap
+      lives inside CodeMirror's configuration, so it means regenerating the
+      bundle per `ui/assets/vendor/README.md` and keeping `cm.rs` in step.
+
+- [ ] **One heading per minute, not per capture.** Two captures inside the same
+      minute currently produce two identical `## 2026-08-18 09:14` headings.
+      They should share one: the newer capture puts its text under the heading
+      that is already at the top of the file.
+
+      This changes the document contract, which is public API — "one H2 per
+      capture" becomes "one H2 per minute of capture" — so it lands in
+      `note.rs`, `README.md`, `AGENTS.md` and the contract tests together. Two
+      things to keep true while doing it: the result must still be a pure
+      *insertion at the head*, or `document::inserted_at_head` stops
+      recognising captures and the editor's save-merge loses the property it
+      relies on; and the check has to read the file's existing head rather than
+      remember the last capture, because the file changes underneath Talkie
+      between captures.
+
+- [ ] **A way to open the notepad from the keyboard — mechanism undecided.**
+      Double-tapping the capture shortcut is *not* the answer: it would put the
+      double-tap window's delay in front of every single capture, which is the
+      one interaction that has to feel instant. The obvious alternative — a
+      second binding — costs a second recorder field in settings, and settings
+      are meant to stay as close to empty as possible. Neither is free; pick
+      when there is a reason to.
+
+- [ ] File location picker (dialog plugin)
+- [ ] Microphone picker
+- [ ] Model idle-unload timer
+- [ ] Error surfacing beyond the editor's save failure
+- [ ] A real app icon (the tray still uses Tauri's default)
 
 ## M4 — Shippable
 

@@ -82,7 +82,8 @@ impl Recorder {
         }
         if models::status(&self.app) != ModelStatus::Ready {
             self.fail(anyhow!(
-                "the speech model is not installed yet — finish first run to download it"
+                // COPY: capture.no_model
+                "speech model not yet installed — finish first run to download it"
             ));
             return;
         }

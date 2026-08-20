@@ -76,10 +76,10 @@ where
                 when=ready
                 fallback=move || {
                     view! {
-                        // COPY: model.body — placeholder
+                        // COPY: onboarding.model.body
                         <p class="muted">
-                            "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi
-                            ut aliquip ex ea commodo consequat. (456 MB, once.)"
+                            "The voice transcription model, Parakeet V3, runs locally, so your data
+                            stays on your device."
                         </p>
                         <Show when=move || progress.get().is_some()>
                             <ProgressBar progress=progress />
@@ -91,14 +91,14 @@ where
                                 prop:disabled=move || busy.get()
                                 on:click=download
                             >
-                                // COPY: model.cta — placeholder
+                                // COPY: onboarding.model.cta
                                 {move || if busy.get() { "Downloading…" } else { "Download Model" }}
                             </button>
                         </div>
                     }
                 }
             >
-                // COPY: model.ready — placeholder
+                // COPY: onboarding.model.installed — placeholder
                 <p class="muted">"Lorem ipsum: Parakeet V3, installed and offline."</p>
             </Show>
         </div>
@@ -117,9 +117,11 @@ fn ProgressBar(progress: RwSignal<Option<ModelProgress>>) -> impl IntoView {
             return String::new();
         };
         if p.done {
-            return "Ready.".to_string();
+            // COPY: onboarding.model.ready
+            return "Finished.".to_string();
         }
         if p.extracting {
+            // COPY: onboarding.model.unpacking
             return "Unpacking…".to_string();
         }
         let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
