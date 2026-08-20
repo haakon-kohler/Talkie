@@ -125,7 +125,10 @@ pub struct Settings {
     pub note_path: String,
     /// Global shortcut accelerator, in Tauri's syntax.
     pub shortcut: String,
-    /// Hold-to-talk instead of press-to-start / press-to-stop.
+    /// Hold-to-talk instead of press-to-start / press-to-stop. The default:
+    /// holding the key is what a capture *is* — you know it is recording
+    /// because your finger is on the key, and letting go cannot leave a
+    /// recording running by accident.
     pub push_to_talk: bool,
     /// Start/stop chimes — the only feedback in an otherwise silent flow.
     pub play_sounds: bool,
@@ -140,7 +143,7 @@ impl Default for Settings {
         Self {
             note_path: String::new(),
             shortcut: DEFAULT_SHORTCUT.to_string(),
-            push_to_talk: false,
+            push_to_talk: true,
             play_sounds: true,
             microphone: None,
             launch_at_login: false,

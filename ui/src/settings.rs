@@ -73,16 +73,20 @@ pub fn SettingsPage() -> impl IntoView {
                 // but macOS drops the grant whenever the binary changes.
                 <AccessibilitySection on_ready=|| {} />
 
+                // Inverted on purpose: push-to-talk is the default, so the box
+                // is the way *out* of it and ships unchecked. The stored field
+                // is still `push_to_talk` — only the control reads backwards.
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        prop:checked=move || settings.get().map(|s| s.push_to_talk).unwrap_or(false)
+                        prop:checked=move || settings.get().map(|s| !s.push_to_talk).unwrap_or(false)
                         on:change=move |ev| {
                             let value = event_target_checked(&ev);
-                            settings.update(|s| { if let Some(s) = s { s.push_to_talk = value; } });
+                            settings.update(|s| { if let Some(s) = s { s.push_to_talk = !value; } });
                         }
                     />
-                    <span>"Toggle Push-to-Talk (Push Twice Instead Of Tap-and-Hold)"</span>
+                    // COPY: settings.push_to_talk.label
+                    <span>"Turn Off Push-to-Talk (Toggle Record)"</span>
                 </label>
 
                 <label class="toggle">
