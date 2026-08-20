@@ -83,6 +83,11 @@ src-tauri/src/
   (`talkie_shared::WindowLabel`).
 - **The editor has no chrome.** No toolbar, no buttons, no status bar. If a
   feature needs a button, it probably does not belong in v1.
+- **`data-wasm-opt-params` in `ui/index.html` is load-bearing.** Release builds
+  only: `wasm-opt` 123 validates its input against MVP unless told otherwise and
+  rejects wasm-bindgen's `memory.copy` with `Fatal: error validating input`. The
+  explicit `--enable-bulk-memory --enable-reference-types
+  --enable-nontrapping-float-to-int` is what lets `cargo tauri build` finish.
 - **The document contract is public API.** One H2 per capture, local time, blank
   line before each entry, file ends with a newline. Changing it breaks Obsidian
   setups and any agent watching the file.
