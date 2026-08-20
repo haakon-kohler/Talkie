@@ -197,27 +197,16 @@ Window title (`editor.window_title`) — *live*
 
 > Talkie
 
-Sample document (`editor.sample`) — *placeholder*
+Sample document (`editor.sample`) — *retired*
 
-The editor mounts on this text until M2 wires it to the real `talkie.md`. It has
-to obey the document contract (one H2 per capture, blank line before each entry,
-trailing newline) so the markdown tinting gets exercised.
+M2 wired the editor to the real `talkie.md`, so there is no sample document any
+more. An empty file opens as an empty editor.
 
-```markdown
-# talkie.md
+Save failure (`editor.trouble`) — *placeholder*
 
-## 2026-08-18 09:14
-Remember to email Sam about the demo Thursday.
-
-## 2026-08-18 09:31
-The **document contract** is the whole integration surface: one H2 per capture,
-local time, a blank line before each entry, file ends with a newline. Obsidian
-just indexes this file; an agent just watches it.
-
-## 2026-08-18 09:40
-Nothing here is saved yet — M0 only proves the editor mounts. Type into it and
-watch the console for the change callback.
-```
+The editor has no chrome by design, with one exception: a save that failed has
+to say so, or the window quietly becomes a text box that eats your writing. The
+string shown is currently the host's raw error.
 
 ---
 

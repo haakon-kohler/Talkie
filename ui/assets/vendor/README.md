@@ -17,7 +17,7 @@ and the generated glue imports it as an ES module. The extern list and the
 bundle's export list must stay in sync — that is the one untyped edge in the app,
 kept deliberately small:
 
-`init · getDoc · setDoc · appendAndReveal · scrollToEnd · openSearch · setTheme · focusEditor · destroy`
+`init · getDoc · setDoc · insertAndReveal · openSearch · setTheme · focusEditor · destroy`
 
 ## Build inputs (checked in, never shipped)
 
@@ -28,7 +28,10 @@ runtime.
 
 ## Pinned versions
 
-Built 2026-08-18 with node v24.18.0, npm 11.16.0.
+Rebuilt 2026-08-20 with node v24.18.0, npm 11.16.0 — same versions as the
+original 2026-08-18 build, direct and transitive, so that rebuild changed
+nothing but the facade: `appendAndReveal` + `scrollToEnd` became a single
+`insertAndReveal(view, pos, text)` when captures moved to the top of the file.
 
 Direct dependencies:
 

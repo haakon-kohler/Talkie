@@ -134,7 +134,79 @@ field itself.
 
 ## M2 — The editor
 
-Not started.
+- [x] `note.rs`: `read`, atomic `write` (temp + rename), and the trailing-newline contract
+- [x] `note::reconcile`: decide a save against what is on disk and what the editor last saw
+- [x] `watcher.rs`: watch the note's *directory* (renames move the inode), settle a burst, emit `NOTE_CHANGED_EXTERNALLY`
+- [x] Distinguish Talkie's own writes from everyone else's, without timing hacks
+- [x] `read_note` / `write_note` commands; re-arm the watcher when the note path changes
+- [x] Editor mounts on the real `talkie.md`, scrolled to the newest entry
+- [x] Debounced autosave (600 ms), flushed immediately on window blur
+- [x] Reload on external change, but only with nothing unsaved
+- [x] A capture that lands mid-edit is carried over instead of overwritten
+- [x] Apply an append as an append: cursor, undo history and scroll survive it
+- [x] The one permitted piece of chrome: a save failure says so
+- [x] **End-to-end: the editor opens the real file, edits save, captures land while it is open**
+
+### M2 notes
+
+- The editor is not the only writer, so the save is not a plain write. It
+  compares three versions — what the editor sends, what is on disk, and what the
+  editor last read — and carries an external *append* over onto the end of its
+  own text. That is exactly the capture-lands-while-you-type case, and it is the
+  one thing this app must never lose. Anything less clear-cut refuses the write
+  and says so rather than picking a winner. `note::reconcile` is pure and tested.
+- The watcher tracks the last-seen *content*, not a hash of it. A hash is enough
+  to recognise Talkie's own writes, but not to serve as the base of that merge.
+- Watching the directory rather than the file is deliberate: every editor worth
+  the name saves by rename, Talkie's own `note::write` included, and a watch on
+  the file would silently detach the first time that happened.
+- End-to-end passed on 2026-08-20 with one gap: *truly simultaneous* editing —
+  Talkie and Obsidian typing into the file at the same instant — was not
+  exercised, so `note::reconcile`'s conflict branch has only ever run in tests.
+  Left there deliberately; it is an esoteric case and the code refuses rather
+  than guesses, so the failure mode is a visible message, not lost text.
+- The tray's "Open Notes" and the hidden-titlebar window already existed from M0.
+  The plan's optional second global shortcut for the editor is not built — the
+  tray and ⌘W are enough, and it would need a second recorder in settings.
+
+## M2.5 — Newest first
+
+The capture log reads better upside down: put a new entry at the *top*, so
+scrolling down walks backwards through time and the thing you just said is the
+thing you are looking at. Decided immediately after M2, and taken then rather
+than later — it changes the document contract, which M4 documents publicly, and
+every file written in the old order is one more file with a seam in it.
+
+- [x] `shared/src/document.rs`: the contract as code — insertion point, splice, capture detection, save reconciliation
+- [x] Insert below YAML frontmatter and a leading `#` title, not at byte zero
+- [x] `note.rs` becomes the disk half: `append` → `prepend`, built on the shared rules
+- [x] `document::reconcile` inverted: a capture now arrives at the head, not the tail
+- [x] Vendored bundle regenerated: `appendAndReveal` + `scrollToEnd` → `insertAndReveal(view, pos, text)`
+- [x] `cm.rs` down to eight externs; byte offsets converted to UTF-16 at the boundary
+- [x] Editor opens at the top and applies a capture as an insert, keeping the cursor
+- [x] Contract updated in `README.md`, `AGENTS.md`, `ui/assets/vendor/README.md`
+- [x] End-to-end: speak twice, confirm the newer entry is on top and the older one is untouched
+
+### M2.5 notes
+
+- The insertion rules moved into `shared` rather than staying host-side. Both
+  halves need them now — the host to save, the editor to apply a capture at the
+  right offset — and a second copy of "where does an entry go" is exactly the
+  kind of thing that drifts silently and corrupts a file.
+- Existing files are left alone, so a `talkie.md` written before today has one
+  seam: newest-first above, oldest-first below. A migration that reversed the
+  file was considered and rejected — it is code that rewrites your notes, runs
+  once, and is hard to test against files it has never seen.
+- Frontmatter is the trap. Inserting at byte zero would push a `---` block down
+  and stop it being frontmatter, breaking the vault the file sits in. A leading
+  `#` title is treated the same way. An unterminated `---` is a horizontal rule,
+  not frontmatter, and is left alone — there is a test for it.
+- The bundle rebuild resolved every direct *and* transitive dependency to the
+  versions already pinned in `ui/assets/vendor/README.md`, so the diff in that
+  checked-in artifact is the facade and nothing else.
+- `insertAndReveal` deliberately does not move the cursor. CodeMirror maps the
+  existing selection through the insertion, so someone mid-sentence when a
+  capture lands keeps their place.
 
 ## M3 — Settings & robustness
 

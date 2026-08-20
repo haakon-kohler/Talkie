@@ -14,6 +14,7 @@ mod shortcut;
 mod sounds;
 mod transcriber;
 mod tray;
+mod watcher;
 mod windows;
 
 use std::sync::Arc;
@@ -40,6 +41,8 @@ pub fn run() {
             commands::request_microphone,
             commands::toggle_recording,
             commands::get_recorder_state,
+            commands::read_note,
+            commands::write_note,
             commands::start_shortcut_recording,
             commands::stop_shortcut_recording,
             commands::get_accessibility,
@@ -56,6 +59,13 @@ pub fn run() {
             handle.manage(Arc::new(recorder::Recorder::new(handle.clone())));
 
             tray::build(&handle)?;
+
+            watcher::init(&handle);
+            // A watch that cannot start is not fatal: the editor still opens
+            // the file, it just will not notice edits made elsewhere.
+            if let Err(e) = watcher::arm(&handle) {
+                log::warn!("talkie: {e:#}");
+            }
 
             shortcut::init(&handle);
             // Neither a bad accelerator nor a missing Accessibility grant may

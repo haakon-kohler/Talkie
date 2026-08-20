@@ -72,6 +72,18 @@ body {
 
 /* ---------------------------------------------------------------- editor -- */
 
+/* The only chrome the editor is allowed, and only when a save has failed. */
+.editor-trouble {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  max-width: 60%;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--bg-raised);
+  background: var(--danger);
+  border-radius: 6px;
+}
 
 .editor-window {
   display: flex;

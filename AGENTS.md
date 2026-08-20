@@ -50,6 +50,7 @@ This is a known, accepted cost of the zero-node stance.
 Cargo.toml        workspace: shared · ui · src-tauri   (release profile lives here)
 Trunk.toml        builds ui/index.html → dist/
 shared/           serde types + command/event names used by BOTH sides
+  src/document.rs   the document contract as code: where a capture goes, how a save merges
 ui/               Leptos CSR crate (wasm32)
   src/main.rs          mount; routes on the Tauri window label
   src/ipc.rs           ~90-line typed invoke/listen shim over window.__TAURI__
@@ -58,6 +59,7 @@ ui/               Leptos CSR crate (wasm32)
   src/settings.rs      settings form
   src/shortcut.rs      the click-and-press shortcut recorder
   src/accessibility.rs the Accessibility grant — settings AND onboarding mount it
+  src/model.rs         the model download — settings AND onboarding mount it
   src/onboarding.rs    first run
   assets/vendor/       frozen codemirror.bundle.js + its build inputs and README
   styles/app.css       the entire stylesheet, handwritten
@@ -65,6 +67,8 @@ src-tauri/src/
   lib.rs            setup: plugins, state, tray, windows, close-to-hide
   commands.rs       every command the webview can call
   shortcut.rs       handy-keys engine thread: the global hotkey + the recorder
+  note.rs           disk half of talkie.md: prepend a capture, read, atomic write
+  watcher.rs        watches talkie.md for changes Talkie's editor did not make
   settings.rs       tauri-plugin-store; the host owns settings, the UI never caches them
   windows.rs        show/hide + the macOS Accessory/Regular Dock dance
   tray.rs           menu-bar item and its menu
@@ -77,7 +81,9 @@ src-tauri/src/
   versions are in `ui/assets/vendor/README.md`. Node runs only there, only
   out-of-repo, and never as part of a Talkie build.
 - **`cm.rs` and the bundle's exports must match.** That is the one untyped edge
-  in the app; keep it at nine functions unless there is a real reason.
+  in the app; keep it at eight functions unless there is a real reason. (It was
+  nine until newest-first ordering retired `scrollToEnd` and turned
+  `appendAndReveal` into `insertAndReveal`.)
 - **Command and event names live in `shared`**, never as string literals on one
   side only.
 - **Settings state is host-side only.** The UI reads via `get_settings` and
@@ -115,9 +121,17 @@ src-tauri/src/
   `Info.plist` unbound, which gives TCC nothing stable to key on. After it, the
   identity is `com.haakonkohler.talkie`. The grant still dies on each rebuild
   (the code hash changes) — remove the row and re-add it.
-- **The document contract is public API.** One H2 per capture, local time, blank
-  line before each entry, file ends with a newline. Changing it breaks Obsidian
-  setups and any agent watching the file.
+- **The editor is never the only writer.** Captures go into `talkie.md` while
+  the editor may be open with unsaved edits, and Obsidian may be in the file too.
+  Saves go through `document::reconcile`, which carries an external capture over
+  into the editor's text and refuses anything it cannot merge. Do not "simplify"
+  that back into a plain write.
+- **The document contract is public API.** One H2 per capture, local time,
+  **newest first**, blank line between entries, file ends with a newline, and
+  insertion happens below any YAML frontmatter and any leading `#` title.
+  Changing it breaks Obsidian setups and any agent watching the file. The rules
+  live in `shared/src/document.rs` — as code, tested, in one place, because the
+  host and the UI both apply them.
 
 ## Code style
 

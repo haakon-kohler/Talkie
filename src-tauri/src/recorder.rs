@@ -217,7 +217,7 @@ impl Recorder {
 
         let settings = self.settings_snapshot();
         let path = note::resolve(&settings.note_path);
-        let written = note::append(&path, &text)
+        let written = note::prepend(&path, &text)
             .with_context(|| format!("could not write to the notes file at {}", path.display()))?;
 
         if written {

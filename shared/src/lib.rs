@@ -5,6 +5,8 @@
 //! codegen step and no generated bindings file to keep in sync — if it compiles
 //! on both sides, the wire format agrees.
 
+pub mod document;
+
 use serde::{Deserialize, Serialize};
 
 pub const APP_NAME: &str = "Talkie";
@@ -43,6 +45,12 @@ pub mod commands {
     pub const GET_ACCESSIBILITY: &str = "get_accessibility";
     /// Open System Settings at the Accessibility pane.
     pub const OPEN_ACCESSIBILITY_SETTINGS: &str = "open_accessibility_settings";
+    /// Read the note file. Returns its text, or an empty string when it does
+    /// not exist yet.
+    pub const READ_NOTE: &str = "read_note";
+    /// Write the note file. The editor's autosave, and the only writer other
+    /// than the capture pipeline's append.
+    pub const WRITE_NOTE: &str = "write_note";
     /// Bind the shortcut again — the way back from a grant that arrived after
     /// the app had already given up on the keyboard.
     pub const RETRY_SHORTCUT: &str = "retry_shortcut";
@@ -145,6 +153,12 @@ impl Default for Settings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowArgs {
     pub label: WindowLabel,
+}
+
+/// Argument payload for `write_note`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WriteNoteArgs {
+    pub text: String,
 }
 
 /// Argument payload for `set_settings`.

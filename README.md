@@ -15,16 +15,21 @@ markdown editor over that same file.
 
 ## The document contract
 
-Every capture appends exactly this:
+Every capture inserts exactly this, **at the top of the file**:
 
 ```markdown
-
 ## 2026-08-18 09:14
 Remember to email Sam about the demo Thursday.
+
 ```
 
 - One `##` heading per capture, in local time.
-- A blank line before each entry; the file always ends with a newline.
+- **Newest first.** Scrolling down walks backwards through time, so the thing
+  you just said is the thing you are looking at.
+- A blank line between entries; the file always ends with a newline.
+- "The top" is below any YAML frontmatter and below a leading `#` title, both of
+  which stay where they are — so the file can carry Obsidian properties without
+  a capture landing above them and quietly stopping them being frontmatter.
 - Default location `~/Documents/Talkie/talkie.md`, changeable in Settings.
 
 That contract is the whole integration story. Point the file inside an Obsidian
