@@ -1,35 +1,7 @@
 # Talkie
 
-**Speak, and it lands in your notes.**
+**The modern notepad.**
 
-Press a shortcut, say the thing, press it again. A local speech model transcribes
-what you said and appends it — timestamped — to one long markdown file. Nothing
-steals focus, nothing gets pasted into whatever app you were using, nothing
-leaves the machine.
-
-Talkie lives in the menu bar. Its second surface is a deliberately buttonless
-markdown editor over that same file.
-
-> **Status: M0 (scaffold).** The app builds, runs, and shows its three windows.
-> The capture pipeline lands in M1 and the real editor in M2. See `PROGRESS.md`.
-
-## The document contract
-
-Every capture appends exactly this:
-
-```markdown
-
-## 2026-08-18 09:14
-Remember to email Sam about the demo Thursday.
-```
-
-- One `##` heading per capture, in local time.
-- A blank line before each entry; the file always ends with a newline.
-- Default location `~/Documents/Talkie/talkie.md`, changeable in Settings.
-
-That contract is the whole integration story. Point the file inside an Obsidian
-vault and Obsidian indexes it. Point an agent at it and the agent watches it.
-Talkie itself stays a capture tool and an editor — nothing more.
 
 ## Running it
 
@@ -42,16 +14,6 @@ cargo tauri dev
 
 `cargo tauri build` produces the `.app`/`.dmg`.
 
-## Living alongside Handy
-
-Talkie does not replace [Handy](https://github.com/cjpais/Handy) — it does a
-different job. Handy pastes dictation into the app you are in; Talkie files it
-into a document. Keep both: their default shortcuts are distinct (Talkie
-defaults to ⌃⌥Space, clear of Handy's ⌥Space and ⌥⇧Space), and macOS lets both
-hold the microphone.
-
-Talkie needs microphone permission only. It never types into other apps, so it
-never asks for accessibility permission.
 
 ## Built with
 
@@ -66,4 +28,4 @@ resampling, and VAD code is ported from Handy (MIT) with its notice retained.
 
 ## License
 
-MIT — see `LICENSE`.
+MIT on the voice transcription module, the rest of the code is closed-source for now.
