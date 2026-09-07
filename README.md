@@ -2,6 +2,7 @@
 
 **The modern notepad.**
 
+Set up one shortcut to immediately transcribe notes to a markdown file. Can be combined with an Openclaw instance to immediately speak to an agent, and can be used with Obsidian as a voice notes platform.
 
 ## Running it
 
@@ -15,7 +16,13 @@ cargo tauri dev
 `cargo tauri build` produces the `.app`/`.dmg`.
 
 
-## Built with
+# About
+
+## Inspiration
+
+Based on [Handy](https://github.com/cjpais/handy), a great FOSS app for voice transcription.
+
+## Architecture
 
 Rust end to end: [Tauri 2](https://tauri.app) hosting a
 [Leptos](https://leptos.dev) CSR frontend compiled to WASM by Trunk. The one
