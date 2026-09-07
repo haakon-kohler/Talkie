@@ -35,4 +35,4 @@ resampling, and VAD code is ported from Handy (MIT) with its notice retained.
 
 ## License
 
-MIT on the voice transcription module, the rest of the code is closed-source for now.
+PolyForm Noncommercial 1.0.0 — see `LICENSE`. The ported Handy audio code remains MIT.
