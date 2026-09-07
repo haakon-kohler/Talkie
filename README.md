@@ -74,4 +74,4 @@ resampling, and VAD code is ported from Handy (MIT) with its notice retained.
 
 ## License
 
-MIT — see `LICENSE`.
+PolyForm Noncommercial 1.0.0 — see `LICENSE`.
