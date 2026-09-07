@@ -28,16 +28,21 @@ pub fn set_settings(
     // leave every later launch without a hotkey.
     shortcut::validate(&settings.shortcut)?;
 
-    let (shortcut_changed, note_path_changed) = {
+    let (shortcut_changed, note_path_changed, autostart_changed) = {
         let mut guard = state.0.lock().expect("settings mutex poisoned");
         let changed = (
             guard.shortcut != settings.shortcut,
             guard.note_path != settings.note_path,
+            guard.launch_at_login != settings.launch_at_login,
         );
         settings::save(&app, &settings)?;
         *guard = settings.clone();
         changed
     };
+
+    if autostart_changed {
+        settings::sync_autostart(&app, settings.launch_at_login);
+    }
 
     // Re-bind before announcing: by the time the UI hears about the new
     // accelerator, it is the one the OS will actually deliver.
@@ -238,6 +243,55 @@ pub fn open_accessibility_settings() -> Result<(), String> {
 #[tauri::command]
 pub fn retry_shortcut(app: AppHandle) -> Result<(), String> {
     shortcut::apply(&app).map_err(|e| format!("{e:#}"))
+}
+
+/// A native save dialog to choose — or create — the notes file.
+///
+/// Returns the picked absolute path, or `None` when cancelled. Nothing is
+/// persisted here: the path lands in the settings form's field, and the Save
+/// button commits it like any typed edit. Talkie only ever re-points — the old
+/// file stays where it was, untouched.
+#[tauri::command]
+pub async fn pick_note_path(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let current = {
+        let state = app.state::<SettingsState>();
+        let guard = state.0.lock().expect("settings mutex poisoned");
+        note::resolve(&guard.note_path)
+    };
+
+    let mut dialog = app.dialog().file().add_filter("Markdown", &["md"]);
+    if let Some(dir) = current.parent().filter(|dir| dir.is_dir()) {
+        dialog = dialog.set_directory(dir);
+    }
+    if let Some(name) = current.file_name() {
+        dialog = dialog.set_file_name(name.to_string_lossy());
+    }
+
+    // Blocking is fine here: async commands run on the runtime, not the main
+    // thread, and the dialog is modal for the user anyway.
+    let picked = dialog.blocking_save_file();
+    Ok(picked
+        .and_then(|path| path.into_path().ok())
+        .map(|mut path| {
+            if path.extension().is_none() {
+                path.set_extension("md");
+            }
+            path.to_string_lossy().into_owned()
+        }))
+}
+
+/// Every input device's name, for the microphone dropdown.
+#[tauri::command]
+pub async fn list_microphones() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::audio_toolkit::list_input_devices()
+            .map(|devices| devices.into_iter().map(|d| d.name).collect())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Convenience for `lib.rs`: seed the managed state at startup.

@@ -20,19 +20,30 @@ use talkie_shared::document;
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M";
 
 /// Put a capture at the top of the note file, creating the file (and its parent
-/// directory) on first use.
+/// directory) on first use. A capture in the same minute as the entry already
+/// at the head joins it instead of opening an identical heading.
 ///
 /// Blank transcriptions are dropped rather than written as an empty heading: a
 /// capture that picked up nothing but silence should leave no trace.
 pub fn prepend(note_path: &Path, text: &str) -> Result<bool> {
+    prepend_at(
+        note_path,
+        text,
+        &Local::now().format(TIMESTAMP_FORMAT).to_string(),
+    )
+}
+
+fn prepend_at(note_path: &Path, text: &str, timestamp: &str) -> Result<bool> {
     let text = text.trim();
     if text.is_empty() {
         return Ok(false);
     }
 
     let existing = read(note_path)?;
-    let entry = document::format_entry(text, &Local::now().format(TIMESTAMP_FORMAT).to_string());
-    write(note_path, &document::splice(&existing, &entry))?;
+    write(
+        note_path,
+        &document::splice_capture(&existing, text, timestamp),
+    )?;
 
     Ok(true)
 }
@@ -127,14 +138,30 @@ mod tests {
     #[test]
     fn the_newest_capture_ends_up_first() {
         let path = temp_note("order");
-        prepend(&path, "First said").expect("prepend");
-        prepend(&path, "Second said").expect("prepend");
+        prepend_at(&path, "First said", "2026-08-22 10:00").expect("prepend");
+        prepend_at(&path, "Second said", "2026-08-22 10:01").expect("prepend");
 
         let contents = read(&path).expect("read");
         let second = contents.find("Second said").expect("second is missing");
         let first = contents.find("First said").expect("first is missing");
         assert!(second < first, "wrong way round: {contents:?}");
         assert!(!contents.contains("\n\n\n"), "too much space: {contents:?}");
+    }
+
+    /// Two captures in one minute share one heading, and read in the order
+    /// they were spoken.
+    #[test]
+    fn same_minute_captures_share_a_heading() {
+        let path = temp_note("same-minute");
+        prepend_at(&path, "First said", "2026-08-22 10:00").expect("prepend");
+        prepend_at(&path, "Second said", "2026-08-22 10:00").expect("prepend");
+        prepend_at(&path, "Third said", "2026-08-22 10:01").expect("prepend");
+
+        let contents = read(&path).expect("read");
+        assert_eq!(
+            contents,
+            "## 2026-08-22 10:01\nThird said\n\n## 2026-08-22 10:00\nFirst said\nSecond said\n"
+        );
     }
 
     #[test]

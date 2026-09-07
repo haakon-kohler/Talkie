@@ -129,7 +129,8 @@ src-tauri/src/
 - **`PROGRESS.md` keeps no backlog.** Track the current milestone and the next
   one. Do not add a "later" section, and do not reinstate one you find deleted —
   deferred work either comes back on its own or was never worth listing.
-- **The document contract is public API.** One H2 per capture, local time,
+- **The document contract is public API.** One H2 per **minute** of capture
+  (a same-minute capture joins the head entry, below its text), local time,
   **newest first**, blank line between entries, file ends with a newline, and
   insertion happens below any YAML frontmatter and any leading `#` title.
   Changing it breaks Obsidian setups and any agent watching the file. The rules

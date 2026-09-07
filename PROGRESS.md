@@ -241,9 +241,10 @@ every file written in the old order is one more file with a seam in it.
 
 ## M3 — Settings & robustness
 
-Not started. Planned scope, from the implementation plan plus decisions since:
+In progress. Scope from the implementation plan plus decisions since; worked in
+list order. Two items wait on design/decision work and are parked at the bottom.
 
-- [ ] **Bold and italic from the keyboard.** ⌘B / ⌘I wrap the selection (or open
+- [x] **Bold and italic from the keyboard.** ⌘B / ⌘I wrap the selection (or open
       an empty pair at the cursor) and unwrap it again when the selection is
       already wrapped. No toolbar, no menu, no hint in the UI — the shortcuts are
       simply there, the way they are in every other editor. No ⌘U: CommonMark has
@@ -254,20 +255,88 @@ Not started. Planned scope, from the implementation plan plus decisions since:
       lives inside CodeMirror's configuration, so it means regenerating the
       bundle per `ui/assets/vendor/README.md` and keeping `cm.rs` in step.
 
-- [ ] **One heading per minute, not per capture.** Two captures inside the same
+- [x] **One heading per minute, not per capture.** Two captures inside the same
       minute currently produce two identical `## 2026-08-18 09:14` headings.
       They should share one: the newer capture puts its text under the heading
-      that is already at the top of the file.
+      that is already at the top of the file, **below the text already there**,
+      so a same-minute train of thought reads top-down like one paragraph.
+      Newest-first still holds between headings.
 
       This changes the document contract, which is public API — "one H2 per
       capture" becomes "one H2 per minute of capture" — so it lands in
       `note.rs`, `README.md`, `AGENTS.md` and the contract tests together. Two
       things to keep true while doing it: the result must still be a pure
-      *insertion at the head*, or `document::inserted_at_head` stops
-      recognising captures and the editor's save-merge loses the property it
-      relies on; and the check has to read the file's existing head rather than
-      remember the last capture, because the file changes underneath Talkie
-      between captures.
+      *insertion the editor's save-merge can recognise*, or
+      `document::inserted_at_head` stops recognising captures and the merge
+      loses the property it relies on; and the check has to read the file's
+      existing head rather than remember the last capture, because the file
+      changes underneath Talkie between captures.
+
+- [x] **File location picker.** A native save-style dialog (dialog plugin) next
+      to the path field, to choose or create a `.md` anywhere. Talkie only
+      re-points: the old file stays where it was, untouched — code that
+      relocates your notes was considered and rejected.
+
+- [x] **Microphone picker.** Enumerate input devices, a dropdown defaulting to
+      "System default" (`microphone: None`), and the recorder honouring it.
+      (The recorder already honoured it — `Recorder::selected_device` shipped
+      in M1; only the dropdown and the `list_microphones` command were new.)
+
+- [x] **Model idle-unload timer.** Fixed at 5 minutes, no setting. The
+      `Transcriber::unload` hook already existed; each capture bumps a
+      generation counter and an unload only fires if its generation is still
+      current, so any capture in between cancels it.
+
+- [x] **Capture failures become macOS notifications.** `talkie://capture-failed`
+      is emitted today and nothing listens; the windows are usually closed when
+      a capture fails. tauri-plugin-notification posts the failure sentence as
+      a system notification, asking for notification permission on first use.
+
+- [x] **Start at Login actually starts at login.** The checkbox had stored a
+      boolean since M0 and nothing read it. tauri-plugin-autostart (LaunchAgent
+      flavour) now enables/disables on change, and the state is re-synced at
+      every startup because the OS side can drift — a checkbox that no longer
+      describes reality is worse than no checkbox.
+
+- [x] **Stop macOS offering Mic Mode** for a capture that holds the microphone
+      for a few seconds. Researched 2026-08-22; the answer is that there is
+      nothing to change. Apple offers Mic Mode to apps that adopt the
+      voice-processing audio unit (AUVoiceIO); Talkie's capture is cpal on the
+      plain HAL input unit and never adopts voice processing, so it already
+      sits on the non-triggering side of the documented rule. For apps that do
+      get the offering there is no public API or Info.plist key to suppress it
+      — the mode is deliberately the user's choice. The end-to-end pass should
+      confirm Control Center stays quiet during a capture; if Tahoe offers the
+      mode anyway, the only route is Feedback Assistant, not code.
+
+- [ ] **End-to-end pass over the milestone:** ⌘B/⌘I in the real editor,
+      same-minute captures share a heading, picker and mic dropdown work, a
+      forced failure notifies, Start at Login writes its LaunchAgent, Control
+      Center offers no Mic Mode mid-capture.
+
+### M3 notes
+
+- The same-minute rule stayed a *recognisable insertion*, which is what the
+  editor's save-merge relies on. `document::inserted_at_head` now returns an
+  `Insertion` — a whole `Entry` at the head, or a `Continuation` that joined
+  the head entry's text — and tries exactly the two offsets the contract can
+  produce, nothing looser. A continuation carried into an editor whose text no
+  longer has that heading is rebuilt as a full entry rather than dropped.
+- ⌘B/⌘I live inside the vendored bundle (a keymap is CodeMirror configuration),
+  so the frozen artifact was regenerated. Everything resolved to the pinned
+  versions except `@marijn/find-cluster-break`, which had shipped new Unicode
+  tables *the day before*; it is now held back by an npm override in the
+  checked-in build inputs so the artifact's diff stayed facade-only. Toggling
+  counts the asterisk run shared by both ends of the selection — odd is italic,
+  two or more is bold — which is what keeps ⌘I on `**x**` producing `***x***`
+  instead of eating a star.
+- The idle unload is a generation counter, not a timer object: every capture
+  bumps it, and a sleeping unload thread only fires if its generation is still
+  current. No cancellation plumbing, and a capture arriving at minute 4:59
+  never races the unload into dropping a model that is about to be used.
+- The file picker returns into the form field and the Save button commits it,
+  same as a typed path — the dialog is input, not a side channel that writes
+  settings on its own.
 
 - [ ] **A way to open the notepad from the keyboard — mechanism undecided.**
       Double-tapping the capture shortcut is *not* the answer: it would put the
@@ -277,11 +346,7 @@ Not started. Planned scope, from the implementation plan plus decisions since:
       are meant to stay as close to empty as possible. Neither is free; pick
       when there is a reason to.
 
-- [ ] File location picker (dialog plugin)
-- [ ] Microphone picker
-- [ ] Model idle-unload timer
-- [ ] Error surfacing beyond the editor's save failure
-- [ ] A real app icon (the tray still uses Tauri's default)
+- [ ] A real app icon (the tray still uses Tauri's default) — waiting on design
 
 ## M4 — Shippable
 

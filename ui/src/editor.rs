@@ -25,6 +25,7 @@ use leptos::html::Div;
 use leptos::leptos_dom::helpers::{set_timeout_with_handle, TimeoutHandle};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use talkie_shared::document::Insertion;
 use talkie_shared::{commands, document, events, WriteNoteArgs};
 use wasm_bindgen::prelude::*;
 
@@ -187,9 +188,21 @@ impl Autosave {
             return;
         };
         match document::inserted_at_head(sent, saved) {
-            Some(inserted) => {
+            Some(Insertion::Entry(inserted)) => {
                 let at = document::insertion_offset(&editor.doc());
                 editor.insert_and_reveal(at, inserted);
+            }
+            // A same-minute capture: it joins the entry it joined on disk. If
+            // typing already carried that heading away, this falls through to
+            // the replace-only-when-clean rule below.
+            Some(Insertion::Continuation { heading, text }) => {
+                let doc = editor.doc();
+                let joined = document::head_heading(&doc) == Some(heading);
+                match document::continuation_insert(&doc, text) {
+                    Some((at, insert)) if joined => editor.insert_and_reveal(at, &insert),
+                    _ if !self.dirty.get() => editor.set_doc(saved),
+                    _ => {}
+                }
             }
             // Not a capture after all. Only safe with nothing unsaved.
             None if !self.dirty.get() => editor.set_doc(saved),
@@ -212,9 +225,16 @@ fn apply(editor: &Editor, incoming: &str) {
         return;
     }
     match document::inserted_at_head(&current, incoming) {
-        Some(inserted) => {
+        Some(Insertion::Entry(inserted)) => {
             let at = document::insertion_offset(&current);
             editor.insert_and_reveal(at, inserted);
+        }
+        Some(Insertion::Continuation { heading, text }) => {
+            let joined = document::head_heading(&current) == Some(heading);
+            match document::continuation_insert(&current, text) {
+                Some((at, insert)) if joined => editor.insert_and_reveal(at, &insert),
+                _ => editor.set_doc(incoming),
+            }
         }
         None => editor.set_doc(incoming),
     }

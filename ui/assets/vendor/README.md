@@ -28,10 +28,13 @@ runtime.
 
 ## Pinned versions
 
-Rebuilt 2026-08-20 with node v24.18.0, npm 11.16.0 — same versions as the
+Rebuilt 2026-08-22 with node v24.18.0, npm 11.16.0 — same versions as the
 original 2026-08-18 build, direct and transitive, so that rebuild changed
-nothing but the facade: `appendAndReveal` + `scrollToEnd` became a single
-`insertAndReveal(view, pos, text)` when captures moved to the top of the file.
+nothing but the facade: ⌘B/⌘I got an inline bold/italic toggle keymap (no new
+exports — the keymap lives inside `init`). Holding the transitive set still
+took one pin: `@marijn/find-cluster-break` 1.0.4 had shipped the day before
+with new Unicode tables, so it is held at 1.0.3 by an npm override (see the
+recipe below). The 2026-08-20 rebuild was the `insertAndReveal` facade change.
 
 Direct dependencies:
 
@@ -62,6 +65,7 @@ Transitive CodeMirror/Lezer packages actually inside the bundle:
 | `@lezer/javascript` | 1.5.4 |
 | `@lezer/lr` | 1.4.10 |
 | `@lezer/markdown` | 1.7.2 |
+| `@marijn/find-cluster-break` | 1.0.3 *(held back by an npm override)* |
 | `crelt` | 1.0.7 |
 | `style-mod` | 4.1.3 |
 | `w3c-keyname` | 2.2.8 |
@@ -80,6 +84,11 @@ npm install --no-fund --no-audit \
 npx rollup -c
 cp codemirror.bundle.js "<repo>/ui/assets/vendor/"
 ```
+
+Install the direct dependencies at the exact pinned versions above, then check
+the installed transitives against the second table before copying anything —
+one drifting utility package is enough to bury the real diff (the checked-in
+`src/package.json` carries an npm `overrides` pin for exactly that reason).
 
 Then update the version tables above, and `ui/src/cm.rs` if the facade's exports
 changed.

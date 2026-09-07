@@ -55,11 +55,13 @@ impl Recorder {
         tray::set_state(&self.app, next);
     }
 
-    /// Report a failure the only way a silent app can: an event the UI may be
-    /// listening to, plus the log. Never panics the capture path.
+    /// Report a failure the ways a silent app can: the log, an event the UI may
+    /// be listening to, and a system notification — the windows are usually all
+    /// closed when a capture fails. Never panics the capture path.
     fn fail(&self, error: anyhow::Error) {
         let message = format!("{error:#}");
         log::error!("talkie: {message}");
+        notify(&self.app, &message);
         let _ = self.app.emit(events::CAPTURE_FAILED, message);
         self.set_state(RecorderState::Idle);
     }
@@ -214,7 +216,11 @@ impl Recorder {
         }
 
         let model_dir = models::model_path(&self.app)?;
-        let text = self.transcriber.transcribe(&model_dir, samples)?;
+        let result = self.transcriber.transcribe(&model_dir, samples);
+        // Scheduled on the error path too: a failed transcription still leaves
+        // the model resident.
+        self.transcriber.schedule_idle_unload();
+        let text = result?;
 
         let settings = self.settings_snapshot();
         let path = note::resolve(&settings.note_path);
@@ -232,4 +238,31 @@ impl Recorder {
         }
         Ok(())
     }
+}
+
+/// Post a failure as a system notification, asking for permission the first
+/// time. Best-effort: a notification that cannot be shown must never take the
+/// capture path down with it.
+fn notify(app: &AppHandle, message: &str) {
+    use tauri_plugin_notification::{NotificationExt, PermissionState};
+
+    let notification = app.notification();
+    let permitted = match notification.permission_state() {
+        Ok(PermissionState::Granted) => true,
+        Ok(PermissionState::Denied) => false,
+        Ok(_) => matches!(
+            notification.request_permission(),
+            Ok(PermissionState::Granted)
+        ),
+        Err(_) => false,
+    };
+    if !permitted {
+        return;
+    }
+
+    let _ = notification
+        .builder()
+        .title(talkie_shared::APP_NAME)
+        .body(message)
+        .show();
 }

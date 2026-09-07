@@ -18,7 +18,8 @@ Conventions:
 
 ## Still to write
 
-The slots below are the only ones still showing lorem ipsum or nothing at all.
+The slots below are the only ones still showing lorem ipsum, nothing at all, or
+working text I drafted that is waiting for your rewrite (marked *working*).
 Everything else in this file is in the app verbatim.
 
 | ID | Where it shows | Note |
@@ -28,6 +29,10 @@ Everything else in this file is in the app verbatim.
 | `onboarding.note` | Footnote under the first-run body | Empty, and nothing renders it yet |
 | `settings.note_path.hint` | Under the notes-file field | Empty |
 | `settings.shortcut.hint` | Under the shortcut field | Empty |
+| `settings.note_path.browse` | The button on the notes-file field | *working* — "Choose…" |
+| `settings.note_path.picker_error` | Status line, if the dialog itself fails | *working* |
+| `settings.microphone.label` | Above the microphone dropdown | *working* — "Microphone" |
+| `settings.microphone.default` | First row of the dropdown | *working* — "System Default" |
 
 ---
 
@@ -147,6 +152,30 @@ Hint (`settings.note_path.hint`) — *placeholder*
 
 > 
 
+Picker button (`settings.note_path.browse`) — *placeholder*. Opens a native
+save dialog to choose or create the `.md` file; the path lands in the field and
+Save commits it. Talkie only re-points — it never moves the old file.
+
+> Choose…
+
+Picker failure (`settings.note_path.picker_error`) — *placeholder* (`{e}` is the
+underlying error). Only if the dialog itself cannot open, not when it is
+cancelled.
+
+> Could not open the file picker: {e}
+
+### Microphone
+
+Label (`settings.microphone.label`) — *placeholder*
+
+> Microphone
+
+Default row (`settings.microphone.default`) — *placeholder*. Means "follow the
+system's input device"; it is what everyone should stay on unless a specific
+device misbehaves. A saved device that is unplugged still shows as itself.
+
+> System Default
+
 ### Shortcut
 
 Label (`settings.shortcut.label`) — *live*
@@ -232,7 +261,9 @@ string shown is currently the host's raw error.
 ## Capture errors
 
 The pipeline is silent by design, so these are the only sentences it can say.
-All *live*, emitted on `talkie://capture-failed`.
+All *live*, emitted on `talkie://capture-failed` — and, since M3, also posted
+as a macOS notification (titled with the app name, "Talkie"), because the
+windows are usually all closed when a capture fails.
 
 | ID | Text |
 | --- | --- |

@@ -48,3 +48,25 @@ pub fn save<R: Runtime>(app: &AppHandle<R>, settings: &Settings) -> Result<(), S
     store.set(KEY, value);
     store.save().map_err(|e| e.to_string())
 }
+
+/// Make the OS agree with the Start at Login setting.
+///
+/// Called at startup as well as on change, because the two can drift: the
+/// LaunchAgent survives the app moving or the user clearing it by hand, and a
+/// checkbox that no longer describes reality is worse than no checkbox.
+/// Best-effort — a login item Talkie cannot write must not stop it starting.
+pub fn sync_autostart<R: Runtime>(app: &AppHandle<R>, wanted: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+
+    let autolaunch = app.autolaunch();
+    let result = if wanted {
+        autolaunch.enable()
+    } else if autolaunch.is_enabled().unwrap_or(false) {
+        autolaunch.disable()
+    } else {
+        Ok(())
+    };
+    if let Err(e) = result {
+        log::warn!("talkie: could not update Start at Login: {e}");
+    }
+}

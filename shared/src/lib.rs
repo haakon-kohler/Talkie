@@ -54,6 +54,11 @@ pub mod commands {
     /// Bind the shortcut again — the way back from a grant that arrived after
     /// the app had already given up on the keyboard.
     pub const RETRY_SHORTCUT: &str = "retry_shortcut";
+    /// Open a native save dialog to choose (or create) the notes file. Returns
+    /// the picked path, or `None` when cancelled — nothing is persisted here.
+    pub const PICK_NOTE_PATH: &str = "pick_note_path";
+    /// The names of every input device, for the settings dropdown.
+    pub const LIST_MICROPHONES: &str = "list_microphones";
 }
 
 /// Event names for host → UI pushes. Namespaced so they can never collide with

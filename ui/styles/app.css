@@ -264,6 +264,46 @@ input[type="text"]:focus {
   outline-offset: -1px;
 }
 
+/* A text field with a button hanging off its end — the notes-file picker. */
+.field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.field-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+button.secondary {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+button.secondary:active {
+  filter: brightness(0.95);
+}
+
+select {
+  width: 100%;
+  padding: 6px 9px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+select:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -1px;
+}
+
 /* The shortcut recorder. It looks like the text field it replaced — same box,
    same metrics — so the settings form reads as one column of inputs rather than
    a form with a button loose in it. */

@@ -30,6 +30,12 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::set_settings,
@@ -48,12 +54,15 @@ pub fn run() {
             commands::get_accessibility,
             commands::open_accessibility_settings,
             commands::retry_shortcut,
+            commands::pick_note_path,
+            commands::list_microphones,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
 
             let settings = settings::load(&handle);
             let first_run = !settings.onboarding_complete;
+            settings::sync_autostart(&handle, settings.launch_at_login);
             commands::manage_settings(&handle, settings);
 
             handle.manage(Arc::new(recorder::Recorder::new(handle.clone())));
