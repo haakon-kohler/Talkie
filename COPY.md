@@ -16,6 +16,21 @@ Conventions:
 
 ---
 
+## Still to write
+
+The slots below are the only ones still showing lorem ipsum or nothing at all.
+Everything else in this file is in the app verbatim.
+
+| ID | Where it shows | Note |
+| --- | --- | --- |
+| `onboarding.model.installed` | Under "Speech model", once the model is on disk | In **settings** this is the only thing that section ever says, so it carries more weight than its length suggests |
+| `editor.trouble` | Bottom-right of the editor, only when a save failed | Currently the host's raw error text |
+| `onboarding.note` | Footnote under the first-run body | Empty, and nothing renders it yet |
+| `settings.note_path.hint` | Under the notes-file field | Empty |
+| `settings.shortcut.hint` | Under the shortcut field | Empty |
+
+---
+
 ## Onboarding window
 
 Window title (`onboarding.window_title`) — *live*
@@ -38,33 +53,47 @@ Footnote (`onboarding.note`) — *placeholder*
 
 > 
 
-First run now runs in three steps, and the page shows one at a time: grant the
-microphone, download the model, then finish. The lede and body above sit at the
-top of all three.
+First run now runs in four steps, and the page shows one at a time: grant
+Accessibility, grant the microphone, download the model, then finish. The lede
+and body above sit at the top of all four. The Accessibility step skips itself
+when the permission is already granted.
 
-### Step 1 — microphone
+### Step 1 — accessibility
 
-Body (`onboarding.microphone.body`) — *placeholder*
+The settings window mounts this same block, and both hide it when the
+permission is already in place. Onboarding runs once, but macOS drops the grant
+whenever the binary changes, so settings has to be able to ask for it too.
 
-> Talkie needs the microphone, and nothing else. It never types into other apps,
-> so macOS never asks for accessibility.
+Body (`onboarding.accessibility.body`) — *live*
 
-Button (`onboarding.microphone.cta`) — *placeholder*
+> This setting allows Talkie to use specific modifier keys as your shortcut button (like the right Option key). We don't look at any information in other apps. 
+
+Button (`onboarding.accessibility.cta`) — *live*
+
+> Allow Accessibility
+
+### Step 2 — microphone
+
+Body (`onboarding.microphone.body`) — *live*
+
+> Talkie needs the microphone to record voice notes.
+
+Button (`onboarding.microphone.cta`) — *live*
 
 > Allow Microphone
 
 Denied-permission error (`onboarding.microphone.denied`) — *live*
 
-> macOS denied the microphone. Open System Settings › Privacy & Security ›
-> Microphone and switch Talkie on.
+> Microphone permission denied. Open System Settings › Privacy & Security ›
+> Microphone and enable microphone access for Talkie.
 
-### Step 2 — the speech model
+### Step 3 — the speech model
 
-Body (`onboarding.model.body`) — *placeholder*
+Body (`onboarding.model.body`) — *live*
 
-> Parakeet V3 runs entirely on this Mac. It is a 456 MB download, once.
+> The voice transcription model, Parakeet V3, runs locally, so your data stays on your device.
 
-Button (`onboarding.model.cta`) — *placeholder*. Reads "Downloading…" while busy.
+Button (`onboarding.model.cta`) — *live*. Reads "Downloading…" while busy.
 
 > Download Model
 
@@ -74,13 +103,19 @@ Progress labels — *live*
 | --- | --- |
 | `onboarding.model.progress` | 123 of 456 MB |
 | `onboarding.model.unpacking` | Unpacking… |
-| `onboarding.model.ready` | Ready. |
+| `onboarding.model.ready` | Finished. |
 
-### Step 3 — finish
+Installed state (`onboarding.model.installed`) — *placeholder*. Shown in place of
+the download button once the model is on disk — in settings too, where it is the
+only thing that section says.
 
-Body (`onboarding.done.body`) — *placeholder*
+> 
 
-> That's everything. Press ⌃⌥Space anywhere and start talking.
+### Step 4 — finish
+
+Body (`onboarding.done.body`) — *live*
+
+> All set! Use the default shortcut ⌃⌥Space and record your first note.
 
 Primary button (`onboarding.cta`) — *live*
 
@@ -122,11 +157,30 @@ Hint (`settings.shortcut.hint`) — *placeholder*
 
 > 
 
+Empty state, when nothing is bound (`settings.shortcut.empty`) — *live*
+
+> None
+
+While recording, before any key is down (`settings.shortcut.recording`) — *live*
+
+> Press keys…
+
+Refused because it has no modifier (`settings.shortcut.invalid`) — *live*
+
+> A shortcut needs at least one modifier — ⌘, ⌥, ⌃ or ⇧.
+
+The field records rather than reads: click it, press the combination, and it
+saves itself when every key comes back up. Escape cancels. A held modifier on
+its own (right ⌘) is a legal shortcut and keeps its side.
+
 ### Toggles
 
-`settings.push_to_talk.label` — *live*
+`settings.push_to_talk.label` — *live*. The control is **inverted**: push-to-talk
+is the default, so this box is the way out of it and ships unchecked. The stored
+setting is still `push_to_talk`; only the checkbox reads backwards, which is why
+the label says "Turn Off".
 
-> Toggle Push-to-Talk (Push Twice Instead Of Tap-and-Hold )
+> Turn Off Push-to-Talk (Toggle Record)
 
 `settings.play_sounds.label` — *live*
 
@@ -162,27 +216,16 @@ Window title (`editor.window_title`) — *live*
 
 > Talkie
 
-Sample document (`editor.sample`) — *placeholder*
+Sample document (`editor.sample`) — *retired*
 
-The editor mounts on this text until M2 wires it to the real `talkie.md`. It has
-to obey the document contract (one H2 per capture, blank line before each entry,
-trailing newline) so the markdown tinting gets exercised.
+M2 wired the editor to the real `talkie.md`, so there is no sample document any
+more. An empty file opens as an empty editor.
 
-```markdown
-# talkie.md
+Save failure (`editor.trouble`) — *placeholder*
 
-## 2026-08-18 09:14
-Remember to email Sam about the demo Thursday.
-
-## 2026-08-18 09:31
-The **document contract** is the whole integration surface: one H2 per capture,
-local time, a blank line before each entry, file ends with a newline. Obsidian
-just indexes this file; an agent just watches it.
-
-## 2026-08-18 09:40
-Nothing here is saved yet — M0 only proves the editor mounts. Type into it and
-watch the console for the change callback.
-```
+The editor has no chrome by design, with one exception: a save that failed has
+to say so, or the window quietly becomes a text box that eats your writing. The
+string shown is currently the host's raw error.
 
 ---
 
@@ -193,7 +236,7 @@ All *live*, emitted on `talkie://capture-failed`.
 
 | ID | Text |
 | --- | --- |
-| `capture.no_model` | the speech model is not installed yet — finish first run to download it |
+| `capture.no_model` | speech model not yet installed — finish first run to download it |
 | `capture.no_microphone_permission` | Talkie needs microphone access — grant it in System Settings › Privacy & Security › Microphone |
 | `capture.no_microphone` | no microphone is available |
 
@@ -225,8 +268,7 @@ Menu items — *live*
 macOS microphone prompt (`system.microphone_usage`) — *live*. Lives in
 `src-tauri/Info.plist`, not in the Rust or the UI.
 
-> Talkie records your voice so it can transcribe it into your notes file,
-> entirely on this Mac.
+> Talkie records your voice so it can locally transcribe it into your notes file.
 
 ---
 
@@ -248,4 +290,4 @@ stays real rather than lorem)
 `app.unknown_window` — *live*. Only reachable if a window is created without a
 matching label.
 
-> Unknown window.
+> Error: unknown window.

@@ -5,6 +5,6 @@
 	<!-- Shown in the macOS microphone prompt. Talkie never pastes into another
 	     app, so the microphone is the only permission it ever asks for. -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Talkie records your voice so it can transcribe it into your notes file, entirely on this Mac.</string>
+	<string>Talkie records your voice so it can locally transcribe it into your notes file.</string>
 </dict>
 </plist>

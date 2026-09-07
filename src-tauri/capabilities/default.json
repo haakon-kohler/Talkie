@@ -1,14 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Baseline capability for all three Talkie windows. Window visibility is driven from Rust (tray, shortcut, close-to-hide), so the webview needs no window permissions of its own.",
+  "description": "Baseline capability for all three Talkie windows. Window visibility is driven from Rust (tray, shortcut, close-to-hide), so the webview needs no window permissions of its own, and the global hotkey is handy-keys rather than a Tauri plugin, so it needs no permission entry either.",
   "windows": [
     "editor",
     "settings",
     "onboarding"
   ],
   "permissions": [
-    "core:default",
-    "global-shortcut:default"
+    "core:default"
   ]
 }

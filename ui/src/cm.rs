@@ -1,8 +1,8 @@
 //! The typed edge over the vendored CodeMirror bundle.
 //!
 //! This is the one place in Talkie where Rust trusts a hand-written declaration
-//! instead of the compiler. Keep it boring: nine externs, mirroring exactly the
-//! nine exports of `assets/vendor/codemirror.bundle.js`. If you change one side,
+//! instead of the compiler. Keep it boring: eight externs, mirroring exactly the
+//! eight exports of `assets/vendor/codemirror.bundle.js`. If you change one side,
 //! change the other — see `assets/vendor/README.md`.
 
 use wasm_bindgen::prelude::*;
@@ -23,11 +23,8 @@ extern "C" {
     #[wasm_bindgen(js_name = "setDoc")]
     fn cm_set_doc(view: &JsValue, text: &str);
 
-    #[wasm_bindgen(js_name = "appendAndReveal")]
-    fn cm_append_and_reveal(view: &JsValue, text: &str);
-
-    #[wasm_bindgen(js_name = "scrollToEnd")]
-    fn cm_scroll_to_end(view: &JsValue);
+    #[wasm_bindgen(js_name = "insertAndReveal")]
+    fn cm_insert_and_reveal(view: &JsValue, pos: usize, text: &str);
 
     #[wasm_bindgen(js_name = "openSearch")]
     fn cm_open_search(view: &JsValue);
@@ -49,9 +46,6 @@ pub struct Editor {
     _on_change: Closure<dyn FnMut()>,
 }
 
-// M2 wires the rest of these up to talkie.md; they exist now so the vendored
-// bundle's surface is declared once and proven to load.
-#[allow(dead_code)]
 impl Editor {
     /// Mount an editor into `parent`.
     ///
@@ -80,18 +74,26 @@ impl Editor {
         cm_set_doc(&self.view, text);
     }
 
-    /// Append at the end and scroll it into view — how a silent capture shows up
-    /// while the editor happens to be open.
-    pub fn append_and_reveal(&self, text: &str) {
-        cm_append_and_reveal(&self.view, text);
-    }
-
-    pub fn scroll_to_end(&self) {
-        cm_scroll_to_end(&self.view);
+    /// Insert at a byte offset into the document and scroll it into view — how
+    /// a silent capture shows up while the editor happens to be open.
+    ///
+    /// The offset is converted here: Rust counts bytes, CodeMirror counts UTF-16
+    /// code units, and a single emoji in a note would be enough to put an entry
+    /// in the wrong place if this were left to the caller.
+    pub fn insert_and_reveal(&self, byte_offset: usize, text: &str) {
+        let doc = self.doc();
+        let position = doc
+            .get(..byte_offset)
+            .map(|head| head.encode_utf16().count())
+            .unwrap_or(0);
+        cm_insert_and_reveal(&self.view, position, text);
     }
 
     /// ⌘F is already bound inside CodeMirror; this is for opening search from
     /// elsewhere (a menu item, say).
+    // Nothing calls this yet — the editor has no menu. Kept so the facade's
+    // surface is declared in one place rather than growing a hole later.
+    #[allow(dead_code)]
     pub fn open_search(&self) {
         cm_open_search(&self.view);
     }

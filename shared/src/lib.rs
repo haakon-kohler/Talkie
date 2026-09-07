@@ -5,12 +5,18 @@
 //! codegen step and no generated bindings file to keep in sync — if it compiles
 //! on both sides, the wire format agrees.
 
+pub mod document;
+
 use serde::{Deserialize, Serialize};
 
 pub const APP_NAME: &str = "Talkie";
 
-/// Default global shortcut: ⌃⌥Space. Deliberately clear of Handy's ⌥Space and
-/// ⌥⇧Space so both apps can stay installed and bound at the same time.
+/// Default global shortcut: ⌃⌥Space, in `handy-keys` syntax.
+///
+/// Side-agnostic on purpose — a default should fire from either hand. A
+/// shortcut *recorded* in settings keeps whichever side was actually pressed
+/// (`CmdRight`, `OptLeft`…), which is the whole reason Talkie left Tauri's
+/// global-shortcut plugin behind: Carbon hotkeys have no side bits.
 pub const DEFAULT_SHORTCUT: &str = "Control+Alt+Space";
 
 /// Tauri command names. Referenced by `#[tauri::command]` wiring on the host and
@@ -30,6 +36,24 @@ pub mod commands {
     /// Start / stop a capture from the UI or the tray, same as the shortcut.
     pub const TOGGLE_RECORDING: &str = "toggle_recording";
     pub const GET_RECORDER_STATE: &str = "get_recorder_state";
+    /// Put the hotkey engine into recording mode: the live binding is released
+    /// and raw key events start arriving as `SHORTCUT_CAPTURE`.
+    pub const START_SHORTCUT_RECORDING: &str = "start_shortcut_recording";
+    /// Leave recording mode and re-bind whatever is in settings.
+    pub const STOP_SHORTCUT_RECORDING: &str = "stop_shortcut_recording";
+    /// Has macOS granted Accessibility? Without it there are no global keys.
+    pub const GET_ACCESSIBILITY: &str = "get_accessibility";
+    /// Open System Settings at the Accessibility pane.
+    pub const OPEN_ACCESSIBILITY_SETTINGS: &str = "open_accessibility_settings";
+    /// Read the note file. Returns its text, or an empty string when it does
+    /// not exist yet.
+    pub const READ_NOTE: &str = "read_note";
+    /// Write the note file. The editor's autosave, and the only writer other
+    /// than the capture pipeline's append.
+    pub const WRITE_NOTE: &str = "write_note";
+    /// Bind the shortcut again — the way back from a grant that arrived after
+    /// the app had already given up on the keyboard.
+    pub const RETRY_SHORTCUT: &str = "retry_shortcut";
 }
 
 /// Event names for host → UI pushes. Namespaced so they can never collide with
@@ -41,6 +65,10 @@ pub mod events {
     pub const NOTE_CHANGED_EXTERNALLY: &str = "talkie://note-changed-externally";
     /// Model download progress, payload `ModelProgress`.
     pub const MODEL_PROGRESS: &str = "talkie://model-progress";
+    /// One raw key event while the shortcut recorder is running. Payload is
+    /// `ShortcutCapture`. Only emitted between `start_shortcut_recording` and
+    /// `stop_shortcut_recording`.
+    pub const SHORTCUT_CAPTURE: &str = "talkie://shortcut-capture";
     /// A capture failed. Payload is a human-readable sentence; the only way an
     /// otherwise silent pipeline can say something went wrong.
     pub const CAPTURE_FAILED: &str = "talkie://capture-failed";
@@ -97,7 +125,10 @@ pub struct Settings {
     pub note_path: String,
     /// Global shortcut accelerator, in Tauri's syntax.
     pub shortcut: String,
-    /// Hold-to-talk instead of press-to-start / press-to-stop.
+    /// Hold-to-talk instead of press-to-start / press-to-stop. The default:
+    /// holding the key is what a capture *is* — you know it is recording
+    /// because your finger is on the key, and letting go cannot leave a
+    /// recording running by accident.
     pub push_to_talk: bool,
     /// Start/stop chimes — the only feedback in an otherwise silent flow.
     pub play_sounds: bool,
@@ -112,7 +143,7 @@ impl Default for Settings {
         Self {
             note_path: String::new(),
             shortcut: DEFAULT_SHORTCUT.to_string(),
-            push_to_talk: false,
+            push_to_talk: true,
             play_sounds: true,
             microphone: None,
             launch_at_login: false,
@@ -125,6 +156,12 @@ impl Default for Settings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowArgs {
     pub label: WindowLabel,
+}
+
+/// Argument payload for `write_note`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WriteNoteArgs {
+    pub text: String,
 }
 
 /// Argument payload for `set_settings`.
@@ -163,5 +200,114 @@ impl ModelProgress {
             return None;
         }
         Some(self.downloaded_bytes as f32 / total as f32)
+    }
+}
+
+/// One key event from the shortcut recorder.
+///
+/// The host reports what is held *right now*; the recorder in the settings
+/// window decides from the stream when a combination is finished. Keeping the
+/// decision on the UI side is what lets the field commit on release without the
+/// host having to guess whether the user is done.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShortcutCapture {
+    /// Everything held, in `handy-keys` syntax (`"CmdRight"`,
+    /// `"Ctrl+Opt+Space"`). Empty once the last key is let go.
+    pub hotkey: String,
+    /// The same thing as glyphs, ready to paint.
+    pub display: String,
+    /// Whether a non-modifier key is part of it. A combination with a key wins
+    /// over the modifier-only prefix that necessarily preceded it.
+    pub has_key: bool,
+    /// Down or up. The recorder commits on the up that empties `hotkey`.
+    pub is_key_down: bool,
+    /// Escape cancels; it can never be part of a shortcut.
+    pub is_escape: bool,
+}
+
+/// Render a `handy-keys` accelerator as macOS glyphs: `"CmdRight+Shift+K"` →
+/// `"R⌘⇧K"`.
+///
+/// Pure string work — no `handy-keys` dependency — so the WASM side can paint a
+/// shortcut without pulling a CoreGraphics event tap into the browser.
+pub fn format_shortcut(accelerator: &str) -> String {
+    accelerator
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(format_shortcut_part)
+        .collect()
+}
+
+fn format_shortcut_part(part: &str) -> String {
+    let lower = part.to_lowercase();
+    let lower = lower.replace('_', "");
+
+    // Split a trailing side off the modifier name, so each modifier needs one
+    // arm below instead of three.
+    let (base, side) = match lower.strip_suffix("left") {
+        Some(base) => (base, "L"),
+        None => match lower.strip_suffix("right") {
+            Some(base) => (base, "R"),
+            None => (lower.as_str(), ""),
+        },
+    };
+
+    let glyph = match base {
+        "cmd" | "command" | "meta" | "super" | "win" | "windows" => Some("⌘"),
+        "shift" => Some("⇧"),
+        "ctrl" | "control" => Some("⌃"),
+        "opt" | "option" | "alt" => Some("⌥"),
+        "fn" | "function" => Some("fn"),
+        _ => None,
+    };
+
+    match glyph {
+        Some(glyph) => format!("{side}{glyph}"),
+        // Not a modifier, so `left`/`right` was part of the key's own name
+        // (the arrow keys) and must not have been split off.
+        None => format_key_name(&lower),
+    }
+}
+
+fn format_key_name(name: &str) -> String {
+    match name {
+        "left" => "←".to_string(),
+        "right" => "→".to_string(),
+        "up" => "↑".to_string(),
+        "down" => "↓".to_string(),
+        "space" => "Space".to_string(),
+        "escape" => "Esc".to_string(),
+        "return" | "enter" => "↩".to_string(),
+        "tab" => "⇥".to_string(),
+        "backspace" | "delete" => "⌫".to_string(),
+        _ => {
+            let mut chars = name.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_the_default_shortcut() {
+        assert_eq!(format_shortcut(DEFAULT_SHORTCUT), "⌃⌥Space");
+    }
+
+    #[test]
+    fn keeps_the_side_of_a_sided_modifier() {
+        assert_eq!(format_shortcut("CmdRight"), "R⌘");
+        assert_eq!(format_shortcut("CmdLeft+ShiftRight+K"), "L⌘R⇧K");
+    }
+
+    #[test]
+    fn does_not_mistake_an_arrow_key_for_a_side() {
+        assert_eq!(format_shortcut("Cmd+Left"), "⌘←");
     }
 }

@@ -2,6 +2,12 @@
 
 Tracking against `talkie_implementation_plan.md`. One checklist per milestone; keep it current.
 
+**No backlog.** Only the milestone being built and the one after it are tracked
+here. Work that is genuinely deferred does not get a holding pen — if it matters
+it will come back on its own, and if it does not, a list of it was never worth
+maintaining. Notes explaining why something *shipped the way it did*, or what a
+finished milestone knowingly left rough, are not a backlog and do belong.
+
 ## M0 — Scaffold
 
 - [x] Rename Handy clone → `0 - Projects/Handy/`; new workspace at `0 - Projects/Talkie/`
@@ -70,13 +76,212 @@ Tracking against `talkie_implementation_plan.md`. One checklist per milestone; k
 - The Notepad window still shows the sample document by design; the file on
   disk is the pipeline's output. The editor reads the real file in M2.
 
+## M1.5 — Shortcut recorder & hotkey engine
+
+Slotted between M1 and M2. The free-text accelerator field was the wrong shape:
+it could be typed wrong (it was, once), and it can't express the shortcut the
+user actually wants — a held right-hand modifier.
+
+**Engine decision.** `tauri-plugin-global-shortcut` is out; `handy-keys 0.3.4`
+(crates.io, same crate Handy ships) is in. The plugin sits on Carbon
+`RegisterEventHotKey`, which has no left/right modifier bits and refuses a
+hotkey with no non-modifier key — so ⌘-right-held is unbindable through it, no
+matter how good the recorder is. `handy-keys` gives side-specific modifiers,
+modifier-only hotkeys, and a real press/release edge for push-to-talk. The cost
+is macOS **Accessibility permission**, which Talkie previously did not need;
+that becomes an onboarding step and a documented change of stance.
+
+- [x] Swap the dependency: drop `tauri-plugin-global-shortcut`, add `handy-keys = "0.3.4"`
+- [x] `shortcut.rs`: manager thread owning `HotkeyManager`, mpsc register/unregister, Pressed/Released → recorder
+- [x] Accessibility: `check_accessibility` / `open_accessibility_settings` behind two commands
+- [x] Onboarding: an Accessibility step alongside the mic step
+- [x] The same Accessibility block in settings, and a `retry_shortcut` command so a
+      grant that arrives late binds the hotkey without a restart
+- [x] Recording mode: `KeyboardListener` on a poll thread, key events → `talkie://shortcut-capture`
+- [x] Live hotkey unregistered while recording, restored on stop or cancel
+- [x] `shared`: `ShortcutCapture` payload + a dependency-free `format_shortcut` glyph helper
+- [x] `set_settings` validation: must parse; a bare key with no modifiers is refused
+- [x] Settings UI: the text field becomes a click-to-record field — live glyph preview, auto-commit on release, Esc cancels
+- [x] Commit rule: a keyed combo commits on its key's release; a modifier-only one when the last modifier is released
+- [x] Migration: existing `"Control+Alt+Space"` still parses, so stored settings carry over untouched
+- [x] Docs: `AGENTS.md` (permission stance), `talkie_implementation_plan.md` (engine table), `COPY.md` (new strings)
+- [x] End-to-end: record ⌘-right held, speak, confirm the entry lands
+
+### M1.5 notes
+
+- Blocking mode is on (`HotkeyManager::new_with_blocking`): a bound shortcut is
+  Talkie's alone and does not also reach the app in front. That is the point of
+  a held-modifier shortcut — but it does mean binding right ⌘ takes right ⌘ away
+  from ⌘C and friends, which is the deal Handy makes too.
+- The recorder waits for *every* key to come up before committing, not the first
+  release. Committing on the first release is how a combination silently saves
+  as just its modifiers (Handy's issue #1578); waiting for the keyboard to be
+  empty is also what makes a modifier-only shortcut recordable at all.
+- The M1 bug value — a bare `"Command"` in the store — is a legal shortcut now
+  rather than an error, and there is a test pinning that so nobody "fixes" it.
+- Accessibility cannot be granted to the `cargo tauri dev` binary at all: it has
+  no `Info.plist` and no bundle id, and as a child of the terminal macOS blames
+  the terminal for the request. Adding `target/debug/talkie` to the pane looks
+  like it worked and does nothing. Use `cargo tauri build --debug --bundles app`
+  plus an explicit `codesign -s -`; see AGENTS.md for the incantation.
+- Bundling turned up an unrelated blocker: `trunk build --release` died in
+  `wasm-opt` ("error validating input" on `memory.copy`). Fixed with explicit
+  feature flags in `ui/index.html`; the release wasm optimises to 450 KB.
+- The Accessibility ask lives in `ui/src/accessibility.rs` and is mounted by
+  *both* settings and onboarding, the way `ModelSection` already was. Onboarding
+  alone would have been useless: it runs once, and the grant can vanish later.
+  The section renders nothing while the permission is in place.
+
+### Deferred by choice
+
+Reset-to-default button, Handy-clash warnings (Handy's own binding moves too
+often for a hardcoded list to stay true), and any recorder chrome beyond the
+field itself.
+
 ## M2 — The editor
 
-Not started.
+- [x] `note.rs`: `read`, atomic `write` (temp + rename), and the trailing-newline contract
+- [x] `note::reconcile`: decide a save against what is on disk and what the editor last saw
+- [x] `watcher.rs`: watch the note's *directory* (renames move the inode), settle a burst, emit `NOTE_CHANGED_EXTERNALLY`
+- [x] Distinguish Talkie's own writes from everyone else's, without timing hacks
+- [x] `read_note` / `write_note` commands; re-arm the watcher when the note path changes
+- [x] Editor mounts on the real `talkie.md`, scrolled to the newest entry
+- [x] Debounced autosave (600 ms), flushed immediately on window blur
+- [x] Reload on external change, but only with nothing unsaved
+- [x] A capture that lands mid-edit is carried over instead of overwritten
+- [x] Apply an append as an append: cursor, undo history and scroll survive it
+- [x] The one permitted piece of chrome: a save failure says so
+- [x] **End-to-end: the editor opens the real file, edits save, captures land while it is open**
+
+### M2 notes
+
+- The editor is not the only writer, so the save is not a plain write. It
+  compares three versions — what the editor sends, what is on disk, and what the
+  editor last read — and carries an external *append* over onto the end of its
+  own text. That is exactly the capture-lands-while-you-type case, and it is the
+  one thing this app must never lose. Anything less clear-cut refuses the write
+  and says so rather than picking a winner. `note::reconcile` is pure and tested.
+- The watcher tracks the last-seen *content*, not a hash of it. A hash is enough
+  to recognise Talkie's own writes, but not to serve as the base of that merge.
+- Watching the directory rather than the file is deliberate: every editor worth
+  the name saves by rename, Talkie's own `note::write` included, and a watch on
+  the file would silently detach the first time that happened.
+- End-to-end passed on 2026-08-20 with one gap: *truly simultaneous* editing —
+  Talkie and Obsidian typing into the file at the same instant — was not
+  exercised, so `note::reconcile`'s conflict branch has only ever run in tests.
+  Left there deliberately; it is an esoteric case and the code refuses rather
+  than guesses, so the failure mode is a visible message, not lost text.
+- The tray's "Open Notes" and the hidden-titlebar window already existed from M0.
+  The plan's optional second global shortcut for the editor is not built — the
+  tray and ⌘W are enough, and it would need a second recorder in settings.
+
+## M2.5 — Newest first
+
+The capture log reads better upside down: put a new entry at the *top*, so
+scrolling down walks backwards through time and the thing you just said is the
+thing you are looking at. Decided immediately after M2, and taken then rather
+than later — it changes the document contract, which M4 documents publicly, and
+every file written in the old order is one more file with a seam in it.
+
+- [x] `shared/src/document.rs`: the contract as code — insertion point, splice, capture detection, save reconciliation
+- [x] Insert below YAML frontmatter and a leading `#` title, not at byte zero
+- [x] `note.rs` becomes the disk half: `append` → `prepend`, built on the shared rules
+- [x] `document::reconcile` inverted: a capture now arrives at the head, not the tail
+- [x] Vendored bundle regenerated: `appendAndReveal` + `scrollToEnd` → `insertAndReveal(view, pos, text)`
+- [x] `cm.rs` down to eight externs; byte offsets converted to UTF-16 at the boundary
+- [x] Editor opens at the top and applies a capture as an insert, keeping the cursor
+- [x] Contract updated in `README.md`, `AGENTS.md`, `ui/assets/vendor/README.md`
+- [x] End-to-end: speak twice, confirm the newer entry is on top and the older one is untouched
+
+### M2.5 notes
+
+- The insertion rules moved into `shared` rather than staying host-side. Both
+  halves need them now — the host to save, the editor to apply a capture at the
+  right offset — and a second copy of "where does an entry go" is exactly the
+  kind of thing that drifts silently and corrupts a file.
+- Existing files are left alone, so a `talkie.md` written before today has one
+  seam: newest-first above, oldest-first below. A migration that reversed the
+  file was considered and rejected — it is code that rewrites your notes, runs
+  once, and is hard to test against files it has never seen.
+- Frontmatter is the trap. Inserting at byte zero would push a `---` block down
+  and stop it being frontmatter, breaking the vault the file sits in. A leading
+  `#` title is treated the same way. An unterminated `---` is a horizontal rule,
+  not frontmatter, and is left alone — there is a test for it.
+- The bundle rebuild resolved every direct *and* transitive dependency to the
+  versions already pinned in `ui/assets/vendor/README.md`, so the diff in that
+  checked-in artifact is the facade and nothing else.
+- `insertAndReveal` deliberately does not move the cursor. CodeMirror maps the
+  existing selection through the insertion, so someone mid-sentence when a
+  capture lands keeps their place.
+
+## M2.6 — Push-to-talk by default, and the first copy resync
+
+- [x] `Settings::default()` ships `push_to_talk: true`
+- [x] Every string the user rewrote in `COPY.md` copied into the app verbatim
+- [x] `COPY.md` markers corrected to describe what the app actually shows
+- [x] The push-to-talk checkbox inverted: it is now the way *out* of the default
+- [x] `COPY.md` carries a "Still to write" table — the only slots left on lorem
+
+### M2.6 notes
+
+- The flipped default only reaches a *fresh* install. `push_to_talk: false` is
+  already persisted in every existing `settings.json`, and serde fills in
+  defaults only for absent fields — so this machine keeps toggle mode until the
+  box is ticked in settings, or the store is deleted.
+- The push-to-talk checkbox is inverted: the stored field is still
+  `push_to_talk`, but the control shows its negation, so the box ships unchecked
+  and means "turn this off". A checkbox for the default state would have shipped
+  pre-ticked, which reads as a setting someone else already changed.
+- Two strings were missed on the first resync pass — `capture.no_model` and the
+  macOS microphone prompt in `Info.plist`. Both are now verbatim. The prompt is
+  the one string that lives outside the Rust and the UI, which is exactly why it
+  was overlooked; `COPY.md` says so next to it.
+- One string had no ID: the line the model section shows once the model is
+  installed. Added as `onboarding.model.installed`, still lorem, awaiting text.
 
 ## M3 — Settings & robustness
 
-Not started.
+Not started. Planned scope, from the implementation plan plus decisions since:
+
+- [ ] **Bold and italic from the keyboard.** ⌘B / ⌘I wrap the selection (or open
+      an empty pair at the cursor) and unwrap it again when the selection is
+      already wrapped. No toolbar, no menu, no hint in the UI — the shortcuts are
+      simply there, the way they are in every other editor. No ⌘U: CommonMark has
+      no underline (`__text__` is bold), and inventing an HTML `<u>` tag would
+      put markup in `talkie.md` that plain-text readers see raw.
+
+      This is the item that touches the frozen `codemirror.bundle.js`: a keymap
+      lives inside CodeMirror's configuration, so it means regenerating the
+      bundle per `ui/assets/vendor/README.md` and keeping `cm.rs` in step.
+
+- [ ] **One heading per minute, not per capture.** Two captures inside the same
+      minute currently produce two identical `## 2026-08-18 09:14` headings.
+      They should share one: the newer capture puts its text under the heading
+      that is already at the top of the file.
+
+      This changes the document contract, which is public API — "one H2 per
+      capture" becomes "one H2 per minute of capture" — so it lands in
+      `note.rs`, `README.md`, `AGENTS.md` and the contract tests together. Two
+      things to keep true while doing it: the result must still be a pure
+      *insertion at the head*, or `document::inserted_at_head` stops
+      recognising captures and the editor's save-merge loses the property it
+      relies on; and the check has to read the file's existing head rather than
+      remember the last capture, because the file changes underneath Talkie
+      between captures.
+
+- [ ] **A way to open the notepad from the keyboard — mechanism undecided.**
+      Double-tapping the capture shortcut is *not* the answer: it would put the
+      double-tap window's delay in front of every single capture, which is the
+      one interaction that has to feel instant. The obvious alternative — a
+      second binding — costs a second recorder field in settings, and settings
+      are meant to stay as close to empty as possible. Neither is free; pick
+      when there is a reason to.
+
+- [ ] File location picker (dialog plugin)
+- [ ] Microphone picker
+- [ ] Model idle-unload timer
+- [ ] Error surfacing beyond the editor's save failure
+- [ ] A real app icon (the tray still uses Tauri's default)
 
 ## M4 — Shippable
 

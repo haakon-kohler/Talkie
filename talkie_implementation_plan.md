@@ -23,7 +23,7 @@ Known costs, accepted with eyes open:
 | Mic capture, device enum, resampling, VAD | Handy's `src-tauri/src/audio_toolkit/` | Self-contained module (cpal 0.16, rubato 0.16.2, vad-rs). MIT — port with copyright notice retained. |
 | Local ASR (Parakeet V3) | `transcribe-rs = "0.3.8"`, `features=["onnx"]` | Same crate Handy uses: `engines::parakeet::{ParakeetModel, ParakeetParams}`. Pure ONNX — **no whisper.cpp, no cmake**. |
 | Model files | `https://blob.handy.computer/parakeet-v3-int8.tar.gz` (extracts to `parakeet-tdt-0.6b-v3-int8/`) + `silero_vad_v4.onnx` | Same URLs as Handy's catalog. Mirror before public distribution. |
-| Global shortcut | `tauri-plugin-global-shortcut 2.3.1` | Pressed/Released → toggle **and** push-to-talk. **No accessibility permission** (Talkie never pastes); mic permission only. |
+| Global shortcut | `handy-keys 0.3.4` | Pressed/Released → toggle **and** push-to-talk. Side-specific modifiers (right ⌘) and modifier-only hotkeys, neither of which Carbon's `RegisterEventHotKey` — and so `tauri-plugin-global-shortcut` — can express. **Needs macOS Accessibility** (M1.5 reversed the original no-accessibility stance); mic permission too. |
 | Feedback sounds | rodio + Handy's chime approach | Start/stop chimes are the "did it hear me?" signal in the silent flow. |
 
 Deliberately omitted vs Handy: paste/accessibility, whisper.cpp models, LLM post-processing, history database (the md file *is* the history), i18n (v1 English), recording overlay (v1: tray icon state + chimes).
@@ -56,7 +56,7 @@ talkie/                         ← new sibling repo (cargo workspace)
     ├── models.rs               # downloader: parakeet tar.gz + silero onnx, progress, checksum
     ├── recorder.rs             # state machine: Idle → Recording → Transcribing
     ├── note.rs                 # append engine + entry formatting + notify file watcher
-    ├── shortcut.rs             # global-shortcut wiring (toggle + PTT)
+    ├── shortcut.rs             # handy-keys engine thread: binding (toggle + PTT) + the recorder
     ├── tray.rs                 # icon states; menu: Open Notes · Record · Settings · Quit
     └── settings.rs             # tauri-plugin-store; settings live backend-side, UI reads/writes via commands
 ```
@@ -102,7 +102,7 @@ Port `audio_toolkit`; model downloader with first-run progress UI (Leptos onboar
 **M2 — The first big task, part B: the editor.** CM host component in Leptos per the spec above; autosave; watcher → event → reload-if-clean; hand-CSS macOS styling + markdown tinting theme; "Open Notes" from tray + optional second global shortcut.
 *Acceptance: feels like a native notes app; Obsidian can edit the same file without conflicts.*
 
-**M3 — Settings & robustness.** Leptos settings form (file location picker via dialog plugin, shortcut recorder, mic picker, PTT toggle, launch-at-login, sound toggle), model idle-unload timer, error surfacing, app icon.
+**M3 — Settings & robustness.** Leptos settings form (file location picker via dialog plugin, mic picker, PTT toggle, launch-at-login, sound toggle — the shortcut recorder landed early, in M1.5), model idle-unload timer, error surfacing, app icon. Additions decided since drafting: **⌘B / ⌘I from the keyboard** with no toolbar and no on-screen hint (the one task that touches the frozen CodeMirror bundle; no ⌘U, because CommonMark has no underline), **condensing captures made in the same minute under one heading** (a change to the document contract), **a keyboard route to the notepad** whose mechanism is deliberately undecided, and **stopping macOS from offering Mic Mode** for a capture that only holds the microphone for a few seconds. Details and the traps in each: `PROGRESS.md`.
 
 **M4 — Shippable.** DMG build (ad-hoc signed for personal use; notarization when distributing), README documenting the file contract + Obsidian setup + Handy coexistence, MIT attribution for the ported Handy code.
 

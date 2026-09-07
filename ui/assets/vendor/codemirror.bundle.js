@@ -28781,21 +28781,22 @@ function setDoc(view, text) {
   });
 }
 
-/** Append text at the end and scroll it into view (used for silent captures). */
-function appendAndReveal(view, text) {
-  const end = view.state.doc.length;
+/**
+ * Insert text at `pos` and scroll it into view -- how a silent capture appears
+ * in an editor that happens to be open.
+ *
+ * `pos` is a CodeMirror document position, i.e. a UTF-16 code unit offset, which
+ * is what the Rust side converts its byte offset into before calling.
+ *
+ * The cursor is left where it was rather than dragged to the insertion: an
+ * insertion above the caret shifts every position after it, and CodeMirror maps
+ * the existing selection through the change for us. Someone mid-sentence when a
+ * capture lands keeps their place.
+ */
+function insertAndReveal(view, pos, text) {
   view.dispatch({
-    changes: { from: end, insert: text },
-    selection: { anchor: end + text.length },
-    scrollIntoView: true,
-  });
-}
-
-function scrollToEnd(view) {
-  const end = view.state.doc.length;
-  view.dispatch({
-    selection: { anchor: end },
-    effects: EditorView.scrollIntoView(end, { y: "end" }),
+    changes: { from: pos, insert: text },
+    effects: EditorView.scrollIntoView(pos, { y: "start" }),
   });
 }
 
@@ -28815,4 +28816,4 @@ function destroy(view) {
   view.destroy();
 }
 
-export { appendAndReveal, destroy, focusEditor, getDoc, init, openSearch, scrollToEnd, setDoc, setTheme };
+export { destroy, focusEditor, getDoc, init, insertAndReveal, openSearch, setDoc, setTheme };

@@ -82,7 +82,8 @@ impl Recorder {
         }
         if models::status(&self.app) != ModelStatus::Ready {
             self.fail(anyhow!(
-                "the speech model is not installed yet — finish first run to download it"
+                // COPY: capture.no_model
+                "speech model not yet installed — finish first run to download it"
             ));
             return;
         }
@@ -217,7 +218,7 @@ impl Recorder {
 
         let settings = self.settings_snapshot();
         let path = note::resolve(&settings.note_path);
-        let written = note::append(&path, &text)
+        let written = note::prepend(&path, &text)
             .with_context(|| format!("could not write to the notes file at {}", path.display()))?;
 
         if written {

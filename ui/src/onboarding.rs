@@ -1,5 +1,6 @@
-//! First run: the two things that actually need doing before Talkie can work —
-//! granting the microphone, and downloading the speech model.
+//! First run: the three things that actually need doing before Talkie can work —
+//! granting Accessibility, granting the microphone, and downloading the speech
+//! model.
 //!
 //! The steps run in order and the page only ever shows the current one, so first
 //! run reads as one instruction at a time rather than a checklist. Prose is
@@ -10,6 +11,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use talkie_shared::commands;
 
+use crate::accessibility::AccessibilitySection;
 use crate::ipc;
 use crate::model::ModelSection;
 
@@ -17,6 +19,7 @@ use crate::model::ModelSection;
 /// "downloading", because the page shows the same block either way.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Step {
+    Accessibility,
     Microphone,
     Model,
     Done,
@@ -24,7 +27,7 @@ enum Step {
 
 #[component]
 pub fn OnboardingPage() -> impl IntoView {
-    let step = RwSignal::new(Step::Microphone);
+    let step = RwSignal::new(Step::Accessibility);
     let error = RwSignal::new(String::new());
     let busy = RwSignal::new(false);
 
@@ -36,14 +39,22 @@ pub fn OnboardingPage() -> impl IntoView {
                 Ok(true) => step.set(Step::Model),
                 // COPY: onboarding.microphone.denied
                 Ok(false) => error.set(
-                    "macOS denied the microphone. Open System Settings › Privacy & Security › \
-                     Microphone and switch Talkie on."
+                    "Microphone permission denied. Open System Settings › Privacy & Security › \
+                     Microphone and enable microphone access for Talkie."
                         .to_string(),
                 ),
                 Err(e) => error.set(e),
             }
             busy.set(false);
         });
+    };
+
+    // Already granted — the usual case after first run — skips the step rather
+    // than showing a button that has nothing left to do.
+    let accessibility_ready = move || {
+        if step.get_untracked() == Step::Accessibility {
+            step.set(Step::Microphone);
+        }
     };
 
     // The model may already be installed — a second run of onboarding, or a
@@ -75,12 +86,13 @@ pub fn OnboardingPage() -> impl IntoView {
                 enable obsidian or openclaw integration? Point the document at the home folder!"
             </p>
 
+            <Show when=move || step.get() == Step::Accessibility>
+                <AccessibilitySection on_ready=accessibility_ready />
+            </Show>
+
             <Show when=move || step.get() == Step::Microphone>
-                // COPY: onboarding.microphone.body — placeholder
-                <p class="muted">
-                    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
-                    incididunt ut labore."
-                </p>
+                // COPY: onboarding.microphone.body
+                <p class="muted">"Talkie needs the microphone to record voice notes."</p>
                 <div class="actions">
                     <span class="status error">{move || error.get()}</span>
                     <button
@@ -88,7 +100,7 @@ pub fn OnboardingPage() -> impl IntoView {
                         prop:disabled=move || busy.get()
                         on:click=grant_microphone
                     >
-                        // COPY: onboarding.microphone.cta — placeholder
+                        // COPY: onboarding.microphone.cta
                         "Allow Microphone"
                     </button>
                 </div>
@@ -99,9 +111,9 @@ pub fn OnboardingPage() -> impl IntoView {
             </Show>
 
             <Show when=move || step.get() == Step::Done>
-                // COPY: onboarding.done.body — placeholder
+                // COPY: onboarding.done.body
                 <p class="muted">
-                    "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore."
+                    "All set! Use the default shortcut ⌃⌥Space and record your first note."
                 </p>
                 <div class="actions">
                     <span class="status error">{move || error.get()}</span>

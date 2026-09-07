@@ -1,12 +1,14 @@
 //! One WASM bundle, three windows. Each window asks Tauri for its own label and
 //! renders the surface that belongs to it.
 
+mod accessibility;
 mod cm;
 mod editor;
 mod ipc;
 mod model;
 mod onboarding;
 mod settings;
+mod shortcut;
 
 use leptos::prelude::*;
 use talkie_shared::WindowLabel;
@@ -25,6 +27,7 @@ fn Root(label: Option<WindowLabel>) -> impl IntoView {
         Some(WindowLabel::Settings) => view! { <settings::SettingsPage /> }.into_any(),
         Some(WindowLabel::Onboarding) => view! { <onboarding::OnboardingPage /> }.into_any(),
         // Only reachable if a window is created without a matching label.
-        None => view! { <p class="unknown-window">"Unknown window."</p> }.into_any(),
+        // COPY: app.unknown_window
+        None => view! { <p class="unknown-window">"Error: unknown window."</p> }.into_any(),
     }
 }
