@@ -2,7 +2,7 @@
 
 **The modern notepad.**
 
-Set up one shortcut to immediately transcribe notes to a markdown file. Can be combined with an Openclaw instance to immediately speak to an agent, and can be used with Obsidian as a voice notes platform.
+Set up one shortcut to immediately transcribe notes to a markdown file. It can be combined with an Openclaw instance to immediately speak to an agent, or used with Obsidian as a voice notes platform.
 
 ![Talkie's editor, newest capture first](docs/editor.png)
 
