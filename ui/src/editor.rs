@@ -25,7 +25,7 @@ use leptos::html::Div;
 use leptos::leptos_dom::helpers::{set_timeout_with_handle, TimeoutHandle};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use talkie_shared::{commands, document, events, WriteNoteArgs};
+use talkie_shared::{commands, document, events, RecorderState, WriteNoteArgs};
 use wasm_bindgen::prelude::*;
 
 use crate::cm::Editor;
@@ -39,6 +39,11 @@ const DEBOUNCE: Duration = Duration::from_millis(600);
 pub fn EditorPage() -> impl IntoView {
     let host: NodeRef<Div> = NodeRef::new();
     let autosave = Autosave::new();
+    // The last capture that failed, until the next one starts. Not part of
+    // `Autosave`: it is the pipeline's failure, not the editor's, and it clears
+    // on a different signal.
+    let capture_failure = RwSignal::new(String::new());
+    follow_capture_failures(capture_failure);
 
     Effect::new({
         let autosave = autosave.clone();
@@ -82,11 +87,18 @@ pub fn EditorPage() -> impl IntoView {
             <div class="editor-host" node_ref=host></div>
             // The one exception to "no chrome": a save that failed has to say so,
             // or the window quietly becomes a text box that eats your writing.
+            // A capture that failed shares the strip — the pipeline is silent by
+            // design, and this is the only place it can say something went
+            // wrong. A save failure wins when both are pending: it is the one
+            // that concerns the text on screen.
             <Show when={
                 let trouble = autosave.trouble;
-                move || !trouble.get().is_empty()
+                move || !trouble.get().is_empty() || !capture_failure.get().is_empty()
             }>
-                <div class="editor-trouble">{move || autosave.trouble.get()}</div>
+                <div class="editor-trouble">{move || {
+                    let trouble = autosave.trouble.get();
+                    if trouble.is_empty() { capture_failure.get() } else { trouble }
+                }}</div>
             </Show>
         </div>
     }
@@ -241,6 +253,22 @@ fn follow_external_changes(autosave: Autosave) {
                 apply(editor, &text);
             }
         });
+    });
+}
+
+/// Show a failed capture, and take it down again when the next capture begins —
+/// a message about the last attempt has nothing to say about this one.
+///
+/// `CAPTURE_FAILED` is emitted to every window; the editor is the one the tray
+/// opens to see whether a capture landed, so it is the one that answers.
+fn follow_capture_failures(capture_failure: RwSignal<String>) {
+    ipc::listen::<String, _>(events::CAPTURE_FAILED, move |message| {
+        capture_failure.set(message);
+    });
+    ipc::listen::<RecorderState, _>(events::RECORDER_STATE, move |state| {
+        if state == RecorderState::Recording {
+            capture_failure.set(String::new());
+        }
     });
 }
 

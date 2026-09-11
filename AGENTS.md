@@ -81,9 +81,10 @@ src-tauri/src/
   versions are in `ui/assets/vendor/README.md`. Node runs only there, only
   out-of-repo, and never as part of a Talkie build.
 - **`cm.rs` and the bundle's exports must match.** That is the one untyped edge
-  in the app; keep it at eight functions unless there is a real reason. (It was
+  in the app; keep it at seven functions unless there is a real reason. (It was
   nine until newest-first ordering retired `scrollToEnd` and turned
-  `appendAndReveal` into `insertAndReveal`.)
+  `appendAndReveal` into `insertAndReveal`, and eight until an `openSearch`
+  nobody called went too — ⌘F lives inside the bundle's own keymap.)
 - **Command and event names live in `shared`**, never as string literals on one
   side only.
 - **Settings state is host-side only.** The UI reads via `get_settings` and

@@ -100,6 +100,55 @@ pub fn resolve(note_path: &str) -> PathBuf {
     PathBuf::from(note_path)
 }
 
+/// Refuse a notes path that a capture could not write to.
+///
+/// Settings is the one place the path is typed by hand, and a typo there used to
+/// save cleanly and fail on the first capture — the shape the accelerator field
+/// had in M1. So the checks are the ones a capture would trip over, run now
+/// instead of later: the folder is created the way the first capture would
+/// create it, and the write is probed the way `write` performs it. Anything
+/// that would fail then fails the setting instead.
+pub fn validate(note_path: &str) -> Result<(), String> {
+    let note_path = note_path.trim();
+    if note_path.is_empty() {
+        // COPY: settings.note_path.empty — placeholder
+        return Err("The notes file needs a path.".to_string());
+    }
+
+    let path = resolve(note_path);
+    if !path.is_absolute() {
+        // COPY: settings.note_path.relative — placeholder
+        return Err(format!(
+            "`{note_path}` is not a full path — it has to start with / or ~/."
+        ));
+    }
+    if path.is_dir() {
+        // COPY: settings.note_path.folder — placeholder
+        return Err(format!(
+            "`{}` is a folder; the notes file has to be a file inside one.",
+            path.display()
+        ));
+    }
+
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| format!("`{note_path}` has no folder to live in."))?;
+    // COPY: settings.note_path.unwritable — placeholder
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("Could not create the folder {}: {e}", parent.display()))?;
+
+    // An existing folder is not necessarily a writable one. The probe is the
+    // exact write a save makes — a temporary sibling — so what passes here is
+    // what will work later.
+    let probe = temp_sibling(&path);
+    fs::write(&probe, b"")
+        .and_then(|()| fs::remove_file(&probe))
+        .map_err(|e| format!("Could not write in the folder {}: {e}", parent.display()))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +235,75 @@ mod tests {
         let path = temp_note("empty");
         write(&path, "").expect("write");
         assert_eq!(read(&path).expect("read"), "");
+    }
+
+    #[test]
+    fn validate_accepts_a_path_whose_folder_does_not_exist_yet() {
+        let path = temp_note("validate-new");
+        assert!(!path.parent().unwrap().exists());
+        validate(path.to_str().unwrap()).expect("a creatable folder is fine");
+        assert!(
+            path.parent().unwrap().is_dir(),
+            "the folder was not created"
+        );
+        assert!(!path.exists(), "validation must not create the file itself");
+    }
+
+    #[test]
+    fn validate_refuses_an_empty_path() {
+        assert!(validate("").is_err());
+        assert!(validate("   ").is_err());
+    }
+
+    #[test]
+    fn validate_refuses_a_relative_path() {
+        assert!(validate("talkie.md").is_err());
+        assert!(validate("Documents/talkie.md").is_err());
+    }
+
+    #[test]
+    fn validate_refuses_a_folder() {
+        let path = temp_note("validate-folder");
+        fs::create_dir_all(&path).unwrap();
+        assert!(validate(path.to_str().unwrap()).is_err());
+    }
+
+    /// The typo case: a path whose "folder" is in fact a file.
+    #[test]
+    fn validate_refuses_a_file_in_the_middle_of_the_path() {
+        let existing = temp_note("validate-through-file");
+        write(&existing, "content").unwrap();
+        let through = existing.join("talkie.md");
+        assert!(validate(through.to_str().unwrap()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_refuses_a_folder_it_cannot_write_in() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = temp_note("validate-read-only");
+        let folder = path.parent().unwrap();
+        fs::create_dir_all(folder).unwrap();
+        fs::set_permissions(folder, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let result = validate(path.to_str().unwrap());
+
+        // Put it back before asserting, or the next run cannot clear the folder.
+        fs::set_permissions(folder, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err(), "a read-only folder passed");
+    }
+
+    #[test]
+    fn validate_leaves_no_probe_behind() {
+        let path = temp_note("validate-no-litter");
+        validate(path.to_str().unwrap()).expect("validate");
+        let strays: Vec<_> = fs::read_dir(path.parent().unwrap())
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(strays.is_empty(), "left behind: {strays:?}");
     }
 
     #[test]

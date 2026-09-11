@@ -28800,10 +28800,6 @@ function insertAndReveal(view, pos, text) {
   });
 }
 
-function openSearch(view) {
-  openSearchPanel(view);
-}
-
 function setTheme(view, dark) {
   view.dispatch({ effects: themeCompartment.reconfigure(themeFor(dark)) });
 }
@@ -28816,4 +28812,4 @@ function destroy(view) {
   view.destroy();
 }
 
-export { destroy, focusEditor, getDoc, init, insertAndReveal, openSearch, setDoc, setTheme };
+export { destroy, focusEditor, getDoc, init, insertAndReveal, setDoc, setTheme };

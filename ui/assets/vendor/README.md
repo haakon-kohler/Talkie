@@ -17,7 +17,11 @@ and the generated glue imports it as an ES module. The extern list and the
 bundle's export list must stay in sync — that is the one untyped edge in the app,
 kept deliberately small:
 
-`init · getDoc · setDoc · insertAndReveal · openSearch · setTheme · focusEditor · destroy`
+`init · getDoc · setDoc · insertAndReveal · setTheme · focusEditor · destroy`
+
+Search is not on that list on purpose. ⌘F is bound inside the bundle by
+`searchKeymap`, and an `openSearch` export sat unused for two milestones
+waiting for a menu item the editor is never going to have.
 
 ## Build inputs (checked in, never shipped)
 
@@ -32,6 +36,11 @@ Rebuilt 2026-08-20 with node v24.18.0, npm 11.16.0 — same versions as the
 original 2026-08-18 build, direct and transitive, so that rebuild changed
 nothing but the facade: `appendAndReveal` + `scrollToEnd` became a single
 `insertAndReveal(view, pos, text)` when captures moved to the top of the file.
+
+Trimmed 2026-09-11: `openSearch` removed from the facade. Done by hand in the
+checked-in bundle and confirmed byte-identical to a rollup build at the versions
+below — the only thing an unpinned rebuild pulls in newer today is
+`@marijn/find-cluster-break`, which is why it now has a row in the table.
 
 Direct dependencies:
 
@@ -62,6 +71,7 @@ Transitive CodeMirror/Lezer packages actually inside the bundle:
 | `@lezer/javascript` | 1.5.4 |
 | `@lezer/lr` | 1.4.10 |
 | `@lezer/markdown` | 1.7.2 |
+| `@marijn/find-cluster-break` | 1.0.3 |
 | `crelt` | 1.0.7 |
 | `style-mod` | 4.1.3 |
 | `w3c-keyname` | 2.2.8 |

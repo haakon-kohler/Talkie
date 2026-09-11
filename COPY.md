@@ -24,7 +24,8 @@ Everything else in this file is in the app verbatim.
 | ID | Where it shows | Note |
 | --- | --- | --- |
 | `onboarding.model.installed` | Under "Speech model", once the model is on disk | In **settings** this is the only thing that section ever says, so it carries more weight than its length suggests |
-| `editor.trouble` | Bottom-right of the editor, only when a save failed | Currently the host's raw error text |
+| `editor.trouble` | Bottom-right of the editor, when a save or a capture failed | Currently the host's raw error text |
+| `settings.note_path.*` | Under the Save button, when the notes path is refused | Working text, see the Notes file section |
 | `onboarding.note` | Footnote under the first-run body | Empty, and nothing renders it yet |
 | `settings.note_path.hint` | Under the notes-file field | Empty |
 | `settings.shortcut.hint` | Under the shortcut field | Empty |
@@ -147,6 +148,19 @@ Hint (`settings.note_path.hint`) — *placeholder*
 
 > 
 
+Refusals — *placeholder*. Save checks the path the way a capture would use it:
+it has to be a full path, not a folder, and its folder has to be creatable and
+writable. The folder is created on Save so the failure shows up now, not on
+the first capture. `{path}` is what was typed, `{folder}` its parent, `{e}` the
+underlying error.
+
+| ID | Text |
+| --- | --- |
+| `settings.note_path.empty` | The notes file needs a path. |
+| `settings.note_path.relative` | `{path}` is not a full path — it has to start with / or ~/. |
+| `settings.note_path.folder` | `{path}` is a folder; the notes file has to be a file inside one. |
+| `settings.note_path.unwritable` | Could not create the folder {folder}: {e} · Could not write in the folder {folder}: {e} |
+
 ### Shortcut
 
 Label (`settings.shortcut.label`) — *live*
@@ -227,12 +241,16 @@ The editor has no chrome by design, with one exception: a save that failed has
 to say so, or the window quietly becomes a text box that eats your writing. The
 string shown is currently the host's raw error.
 
+The same strip shows a failed capture (the `capture.*` sentences below) until
+the next capture starts. A save failure takes precedence if both are pending.
+
 ---
 
 ## Capture errors
 
 The pipeline is silent by design, so these are the only sentences it can say.
-All *live*, emitted on `talkie://capture-failed`.
+All *live*, emitted on `talkie://capture-failed` and shown in the editor's
+trouble strip.
 
 | ID | Text |
 | --- | --- |

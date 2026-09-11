@@ -14,7 +14,6 @@
 - launch at login, host side
 - single-instance guard
 - stop macOS offering Mic Mode for a few-seconds capture
-- document contract back in `README.md`
 - Obsidian setup and Handy coexistence in `README.md`
 - ad-hoc signed DMG
 - model mirrored off `blob.handy.computer` before distributing
@@ -26,8 +25,3 @@
 ## Bugs
 
 - launch-at-login checkbox persists and nothing reads it — the setting lies
-- `CAPTURE_FAILED` emitted by `recorder.rs:63`, no listener anywhere in `ui/src` — a failed capture is silent
-- `README.md` lost the document contract in the description rewrite
-- notes path is unvalidated free text — a typo saves clean and fails at capture time, the shape that already bit once with the accelerator field
-- existing installs stay on `push_to_talk: false` — serde fills defaults only for absent fields
-- `cm.rs::open_search` has no caller — the bundle's own `searchKeymap` owns ⌘F

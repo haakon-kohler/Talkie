@@ -13,7 +13,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { markdown } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, HighlightStyle, indentUnit } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
-import { search, searchKeymap, openSearchPanel } from "@codemirror/search";
+import { search, searchKeymap } from "@codemirror/search";
 
 const mdHighlight = HighlightStyle.define([
   { tag: tags.heading1, class: "cm-md-h1" },
@@ -103,10 +103,6 @@ export function insertAndReveal(view, pos, text) {
     changes: { from: pos, insert: text },
     effects: EditorView.scrollIntoView(pos, { y: "start" }),
   });
-}
-
-export function openSearch(view) {
-  openSearchPanel(view);
 }
 
 export function setTheme(view, dark) {

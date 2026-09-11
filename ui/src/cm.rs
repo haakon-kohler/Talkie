@@ -1,8 +1,8 @@
 //! The typed edge over the vendored CodeMirror bundle.
 //!
 //! This is the one place in Talkie where Rust trusts a hand-written declaration
-//! instead of the compiler. Keep it boring: eight externs, mirroring exactly the
-//! eight exports of `assets/vendor/codemirror.bundle.js`. If you change one side,
+//! instead of the compiler. Keep it boring: seven externs, mirroring exactly the
+//! seven exports of `assets/vendor/codemirror.bundle.js`. If you change one side,
 //! change the other — see `assets/vendor/README.md`.
 
 use wasm_bindgen::prelude::*;
@@ -25,9 +25,6 @@ extern "C" {
 
     #[wasm_bindgen(js_name = "insertAndReveal")]
     fn cm_insert_and_reveal(view: &JsValue, pos: usize, text: &str);
-
-    #[wasm_bindgen(js_name = "openSearch")]
-    fn cm_open_search(view: &JsValue);
 
     #[wasm_bindgen(js_name = "setTheme")]
     fn cm_set_theme(view: &JsValue, dark: bool);
@@ -87,15 +84,6 @@ impl Editor {
             .map(|head| head.encode_utf16().count())
             .unwrap_or(0);
         cm_insert_and_reveal(&self.view, position, text);
-    }
-
-    /// ⌘F is already bound inside CodeMirror; this is for opening search from
-    /// elsewhere (a menu item, say).
-    // Nothing calls this yet — the editor has no menu. Kept so the facade's
-    // surface is declared in one place rather than growing a hole later.
-    #[allow(dead_code)]
-    pub fn open_search(&self) {
-        cm_open_search(&self.view);
     }
 
     pub fn set_theme(&self, dark: bool) {

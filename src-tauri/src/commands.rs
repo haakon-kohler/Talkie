@@ -21,12 +21,16 @@ pub fn get_settings(state: State<'_, SettingsState>) -> Settings {
 pub fn set_settings(
     app: AppHandle,
     state: State<'_, SettingsState>,
-    settings: Settings,
+    mut settings: Settings,
 ) -> Result<(), String> {
-    // Refuse an unbindable accelerator before anything is persisted: this
-    // command is the store's only writer, and a saved-but-invalid shortcut would
-    // leave every later launch without a hotkey.
+    // Refuse anything unusable before it is persisted: this command is the
+    // store's only writer, so a saved-but-invalid value would come back on
+    // every later launch. A shortcut that will not bind leaves the app without
+    // a hotkey; a notes path that cannot be written fails on the first capture,
+    // silently, long after the typo was made.
     shortcut::validate(&settings.shortcut)?;
+    settings.note_path = settings.note_path.trim().to_string();
+    note::validate(&settings.note_path)?;
 
     let (shortcut_changed, note_path_changed) = {
         let mut guard = state.0.lock().expect("settings mutex poisoned");

@@ -224,10 +224,14 @@ every file written in the old order is one more file with a seam in it.
 
 ### M2.6 notes
 
-- The flipped default only reaches a *fresh* install. `push_to_talk: false` is
-  already persisted in every existing `settings.json`, and serde fills in
-  defaults only for absent fields — so this machine keeps toggle mode until the
-  box is ticked in settings, or the store is deleted.
+- The flipped default did not reach existing installs at first:
+  `push_to_talk: false` was already persisted in every `settings.json`, and
+  serde fills in defaults only for absent fields. The store now carries a
+  `schema` number beside the blob, and `settings::load` migrates anything older
+  — schema 0 gets the push-to-talk default applied once and is stamped 1. The
+  cost is that an install which had deliberately chosen toggle mode *after*
+  M2.6 but before the stamp gets flipped too; only this machine fits that
+  window.
 - The push-to-talk checkbox is inverted: the stored field is still
   `push_to_talk`, but the control shows its negation, so the box ships unchecked
   and means "turn this off". A checkbox for the default state would have shipped
