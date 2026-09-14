@@ -6,6 +6,7 @@
 
 mod audio_toolkit;
 mod commands;
+mod hooks;
 mod models;
 mod note;
 mod recorder;

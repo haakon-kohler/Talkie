@@ -21,7 +21,7 @@ use crate::audio_toolkit::vad::{
 use crate::audio_toolkit::AudioRecorder;
 use crate::settings::SettingsState;
 use crate::transcriber::Transcriber;
-use crate::{models, note, sounds, tray};
+use crate::{hooks, models, note, sounds, tray};
 
 /// Captures shorter than this are treated as a slip of the finger — a
 /// double-tap on the shortcut, a key held for a moment — and dropped without
@@ -218,6 +218,13 @@ impl Recorder {
 
         let settings = self.settings_snapshot();
         let path = note::resolve(&settings.note_path);
+
+        // The one place a user's own code gets a say before the file changes.
+        let Some(text) = hooks::on_capture(&self.app, &path, &text) else {
+            log::info!("talkie: the on-capture hook dropped the capture; nothing written");
+            return Ok(());
+        };
+
         let written = note::prepend(&path, &text)
             .with_context(|| format!("could not write to the notes file at {}", path.display()))?;
 
@@ -227,6 +234,7 @@ impl Recorder {
                 text.len(),
                 path.display()
             );
+            hooks::after_capture(&self.app, &path, &text);
         } else {
             log::info!("talkie: the model heard nothing; nothing written");
         }

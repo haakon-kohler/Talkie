@@ -18,7 +18,7 @@
 - ad-hoc signed DMG
 - model mirrored off `blob.handy.computer` before distributing
 - notarization
-- OpenClaw integration docs and hooks
+- hook docs — `hooks.rs` runs `on-capture` and `after-capture` from the app-data `hooks/` folder, nothing tells the user yet; OpenClaw integration goes there
 - Windows / Linux pass
 - archive rotation once one file gets unwieldy
 

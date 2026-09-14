@@ -68,6 +68,7 @@ src-tauri/src/
   commands.rs       every command the webview can call
   shortcut.rs       handy-keys engine thread: the global hotkey + the recorder
   note.rs           disk half of talkie.md: prepend a capture, read, atomic write
+  hooks.rs          the plugin system: executables in app-data/hooks/, run at the edges of a capture
   watcher.rs        watches talkie.md for changes Talkie's editor did not make
   settings.rs       tauri-plugin-store; the host owns settings, the UI never caches them
   windows.rs        show/hide + the macOS Accessory/Regular Dock dance

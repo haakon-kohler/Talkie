@@ -281,6 +281,12 @@ Not started. Planned scope, from the implementation plan plus decisions since:
       are meant to stay as close to empty as possible. Neither is free; pick
       when there is a reason to.
 
+- [x] **Capture hooks.** The plugin system, as small as it can be: an
+      executable named `on-capture` or `after-capture` in the app-data
+      `hooks/` folder, run at the edges of a capture (`src-tauri/src/hooks.rs`).
+      Chosen over in-process plugins so nothing loads at launch and a first
+      plugin is a shell script; Lua for UI surfaces waits until hooks prove
+      insufficient.
 - [ ] File location picker (dialog plugin)
 - [ ] Microphone picker
 - [ ] Model idle-unload timer
