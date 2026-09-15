@@ -82,6 +82,10 @@ pub fn insertion_offset(text: &str) -> usize {
             break;
         }
     }
+    debug_assert!(
+        text.is_char_boundary(offset),
+        "insertion offset {offset} splits a character"
+    );
     offset
 }
 
@@ -102,7 +106,12 @@ pub fn splice(text: &str, entry: &str) -> String {
         out.push('\n');
         out.push_str(tail);
     }
-    normalized(&out)
+    let out = normalized(&out);
+    debug_assert!(
+        out.len() >= text.len() + entry.trim_end_matches('\n').len(),
+        "splice lost text"
+    );
+    out
 }
 
 /// What was inserted at the head of `base` to produce `newer` — if an insertion
@@ -123,7 +132,13 @@ pub fn inserted_at_head<'a>(base: &str, newer: &'a str) -> Option<&'a str> {
     }
     let rest = &newer[head.len()..];
     let inserted_len = rest.len().checked_sub(tail.len())?;
-    Some(&rest[..inserted_len])
+    let inserted = &rest[..inserted_len];
+    debug_assert_eq!(
+        newer.len(),
+        base.len() + inserted.len(),
+        "the insertion does not account for the whole difference"
+    );
+    Some(inserted)
 }
 
 /// What a save should do, given three versions of the document.
@@ -187,6 +202,10 @@ fn frontmatter_end(text: &str) -> usize {
 
 /// The line starting at `from`, including its newline.
 fn line_at(text: &str, from: usize) -> &str {
+    debug_assert!(
+        text.is_char_boundary(from),
+        "line offset {from} splits a character"
+    );
     let rest = &text[from..];
     match rest.find('\n') {
         Some(end) => &rest[..=end],

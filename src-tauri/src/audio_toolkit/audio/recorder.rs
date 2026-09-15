@@ -67,7 +67,22 @@ impl AudioRecorder {
         self
     }
 
+    /// The worker and its command channel come and go together; one without
+    /// the other is a half-closed recorder that can neither record nor stop.
+    fn check_invariants(&self) {
+        debug_assert_eq!(
+            self.worker_handle.is_some(),
+            self.cmd_tx.is_some(),
+            "worker thread and command channel out of step"
+        );
+        debug_assert!(
+            self.device.is_none() || self.worker_handle.is_some(),
+            "a device is held without a worker to use it"
+        );
+    }
+
     pub fn open(&mut self, device: Option<Device>) -> Result<(), Box<dyn std::error::Error>> {
+        self.check_invariants();
         if self.worker_handle.is_some() {
             if !self.needs_reopen() {
                 return Ok(()); // already open
@@ -75,6 +90,7 @@ impl AudioRecorder {
             log::warn!("Capture stream failed; rebuilding microphone stream");
             let _ = self.close();
         }
+        debug_assert!(self.worker_handle.is_none(), "close left a worker running");
 
         self.stream_error.store(false, Ordering::Relaxed);
 
@@ -102,7 +118,7 @@ impl AudioRecorder {
                 let device_name = thread_device.name().unwrap_or_default();
                 let cached_config = config_cache
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .as_ref()
                     .filter(|(name, _)| !device_name.is_empty() && *name == device_name)
                     .map(|(_, cfg)| cfg.clone());
@@ -178,7 +194,10 @@ impl AudioRecorder {
                 // The device accepted this config; remember it so the next
                 // open skips the HAL property queries entirely.
                 if !config_was_cached && !device_name.is_empty() {
-                    *config_cache.lock().unwrap() = Some((device_name, config));
+                    *config_cache
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        Some((device_name, config));
                 }
 
                 Ok((stream, sample_rate))
@@ -195,7 +214,9 @@ impl AudioRecorder {
                     // A failed open may mean the cached config went stale
                     // (device re-plugged, rate/format changed in the OS).
                     // Drop it so the next attempt re-queries the device.
-                    *config_cache.lock().unwrap() = None;
+                    *config_cache
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
                     log::error!("{error_message}");
                     let _ = init_tx.send(Err(error_message));
                 }
@@ -207,6 +228,7 @@ impl AudioRecorder {
                 self.device = Some(device);
                 self.cmd_tx = Some(cmd_tx);
                 self.worker_handle = Some(worker);
+                self.check_invariants();
                 Ok(())
             }
             Ok(Err(error_message)) => {
@@ -269,6 +291,7 @@ impl AudioRecorder {
             let _ = h.join();
         }
         self.device = None;
+        self.check_invariants();
         Ok(())
     }
 
@@ -284,8 +307,14 @@ impl AudioRecorder {
         T: Sample + SizedSample + Send + 'static,
         f32: cpal::FromSample<T>,
     {
+        assert!(channels >= 1, "an input stream needs at least one channel");
         let mut output_buffer = Vec::new();
         let mut eos_sent = false;
+        // The callback runs ~100 times a second for as long as the stream is
+        // open. If the consumer is gone, saying so once is information; saying
+        // so on every callback is a log that fills a disk (or an IDE's
+        // terminal buffer) until something else falls over.
+        let mut send_failed = false;
 
         let stream_cb = move |data: &[T], _: &cpal::InputCallbackInfo| {
             if stop_flag.load(Ordering::Relaxed) {
@@ -318,8 +347,10 @@ impl AudioRecorder {
             if sample_tx
                 .send(AudioChunk::Samples(output_buffer.clone()))
                 .is_err()
+                && !send_failed
             {
-                log::error!("Failed to send samples");
+                send_failed = true;
+                log::error!("Failed to send samples; the capture consumer is gone");
             }
         };
 
@@ -414,6 +445,7 @@ fn run_consumer(
     cmd_rx: mpsc::Receiver<Cmd>,
     stop_flag: Arc<AtomicBool>,
 ) {
+    debug_assert!(in_sample_rate > 0, "a stream cannot run at 0 Hz");
     let mut frame_resampler = FrameResampler::new(
         in_sample_rate as usize,
         constants::SAMPLE_RATE as usize,
@@ -424,6 +456,11 @@ fn run_consumer(
     let mut recording = false;
     let mut capture_ready_tx: Option<mpsc::Sender<()>> = None;
 
+    /// Keep what the detector says is speech, up to the capture cap.
+    ///
+    /// Past the cap frames are dropped on the floor and the fact is logged
+    /// once per capture: the buffer is the only thing in the app that grows
+    /// with wall-clock time, so it is the one place a bound has to be.
     fn handle_frame(
         samples: &[f32],
         recording: bool,
@@ -433,16 +470,40 @@ fn run_consumer(
         if !recording {
             return;
         }
+        if out_buf.len() >= constants::MAX_CAPTURE_SAMPLES {
+            if out_buf.len() == constants::MAX_CAPTURE_SAMPLES {
+                log::warn!(
+                    "capture reached the {}s cap; further audio is dropped",
+                    constants::MAX_CAPTURE_SECONDS
+                );
+                // Nudge past the cap so the warning fires once, not per frame.
+                // Truncated back below before it is handed out.
+                out_buf.push(0.0);
+            }
+            return;
+        }
 
-        if let Some(detector) = vad {
-            let mut det = detector.lock().unwrap();
+        let kept: &[f32] = if let Some(detector) = vad {
+            // A poisoned lock means the detector panicked mid-frame on some
+            // earlier call. Its state is reset at every Start, so carrying on
+            // with it beats killing the consumer thread and, with it, every
+            // future capture.
+            let mut det = detector
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             match det.push_frame(samples).unwrap_or(VadFrame::Speech(samples)) {
-                VadFrame::Speech(buf) => out_buf.extend_from_slice(buf),
-                VadFrame::Noise => {}
+                VadFrame::Speech(buf) => {
+                    let room = constants::MAX_CAPTURE_SAMPLES - out_buf.len();
+                    out_buf.extend_from_slice(&buf[..buf.len().min(room)]);
+                    return;
+                }
+                VadFrame::Noise => return,
             }
         } else {
-            out_buf.extend_from_slice(samples);
-        }
+            samples
+        };
+        let room = constants::MAX_CAPTURE_SAMPLES - out_buf.len();
+        out_buf.extend_from_slice(&kept[..kept.len().min(room)]);
     }
 
     // Poll commands even when a disconnected device stops producing samples
@@ -470,7 +531,10 @@ fn run_consumer(
                     // Clear the detector's smoothing + recurrent state before it
                     // sees any frames of the new session.
                     if let Some(detector) = &vad {
-                        detector.lock().unwrap().reset();
+                        detector
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .reset();
                     }
                 }
                 Cmd::Stop(reply_tx) => {
@@ -511,7 +575,14 @@ fn run_consumer(
                         handle_frame(frame, true, &vad, &mut processed_samples)
                     });
 
+                    // The one sample past the cap is the "warned already" mark.
+                    processed_samples.truncate(constants::MAX_CAPTURE_SAMPLES);
+                    debug_assert!(
+                        processed_samples.len() <= constants::MAX_CAPTURE_SAMPLES,
+                        "capture buffer escaped its cap"
+                    );
                     let _ = reply_tx.send(std::mem::take(&mut processed_samples));
+                    debug_assert!(processed_samples.is_empty(), "take left samples behind");
 
                     // Resume the audio callback so the consumer loop can keep
                     // receiving chunks on the still-open stream.

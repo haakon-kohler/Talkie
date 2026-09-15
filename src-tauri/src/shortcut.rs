@@ -29,7 +29,7 @@
 use std::str::FromStr;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use handy_keys::{Hotkey, HotkeyId, HotkeyManager, HotkeyState, Key, KeyboardListener};
@@ -43,6 +43,29 @@ use crate::settings::SettingsState;
 /// keyboard again. Also the worst-case latency from a keypress to a capture
 /// starting, which at 10 ms is far below anything a hand can notice.
 const TICK: Duration = Duration::from_millis(10);
+
+/// How long a caller waits for the engine thread's verdict before giving up.
+///
+/// The callers are Tauri commands, which run on the main thread. The engine
+/// thread, in turn, drives the recorder, and the recorder updates the tray —
+/// which marshals onto the main thread and waits. A hotkey press landing in
+/// the same instant as a settings save would otherwise hold both threads
+/// waiting on each other forever. A bounded wait turns that into one failed
+/// command.
+const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How often the engine asks macOS whether it still holds Accessibility while
+/// a tap exists.
+///
+/// The grant can vanish under a running app: `tccutil reset`, the switch in
+/// System Settings, or a rebuild that changes the ad-hoc code hash. A tap
+/// whose process is no longer trusted does not simply go quiet — every event
+/// it returns is refused by WindowServer as a synthesized event, the tap is
+/// disabled, the callback re-enables it, and the two ping-pong at over 100 Hz.
+/// That storm hung this machine on 2026-09-12. Tearing the tap down within
+/// one interval bounds it. The check is one XPC round trip to tccd, so it
+/// stays rare.
+const TRUST_CHECK: Duration = Duration::from_secs(5);
 
 /// What the rest of the app can ask the engine thread to do.
 enum Cmd {
@@ -71,13 +94,14 @@ impl ShortcutState {
             .map_err(|_| "the shortcut engine has stopped".to_string())
     }
 
-    /// Send a command and wait for the thread's verdict.
+    /// Send a command and wait — a bounded time — for the thread's verdict.
     fn request(&self, make: impl FnOnce(Sender<Result<(), String>>) -> Cmd) -> Result<(), String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.send(make(reply_tx))?;
-        reply_rx
-            .recv()
-            .map_err(|_| "the shortcut engine did not answer".to_string())?
+        reply_rx.recv_timeout(REPLY_TIMEOUT).map_err(|e| match e {
+            RecvTimeoutError::Timeout => "the shortcut engine did not answer in time".to_string(),
+            RecvTimeoutError::Disconnected => "the shortcut engine did not answer".to_string(),
+        })?
     }
 
     pub fn start_recording(&self) -> Result<(), String> {
@@ -92,6 +116,10 @@ impl ShortcutState {
 /// Start the engine thread and register it as managed state. Called once, from
 /// `lib.rs`, before the first `apply`.
 pub fn init(app: &AppHandle) {
+    assert!(
+        app.try_state::<ShortcutState>().is_none(),
+        "the shortcut engine was started twice"
+    );
     let (tx, rx) = mpsc::channel();
     let handle = app.clone();
     std::thread::Builder::new()
@@ -149,6 +177,8 @@ struct Engine {
     wanted: String,
     bound: Option<HotkeyId>,
     listener: Option<KeyboardListener>,
+    /// When the Accessibility grant was last confirmed. See `TRUST_CHECK`.
+    trust_checked: Instant,
 }
 
 fn run(app: AppHandle, rx: Receiver<Cmd>) {
@@ -158,6 +188,7 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
         wanted: String::new(),
         bound: None,
         listener: None,
+        trust_checked: Instant::now(),
     };
 
     loop {
@@ -168,11 +199,53 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
             Err(RecvTimeoutError::Disconnected) => return,
         }
 
+        engine.check_trust();
         engine.poll();
+        engine.check_invariants();
     }
 }
 
 impl Engine {
+    /// What must hold between commands, whichever mode the engine is in.
+    fn check_invariants(&self) {
+        // A binding is an id handed out by a manager; without one it is stale.
+        debug_assert!(
+            self.bound.is_none() || self.manager.is_some(),
+            "a hotkey is bound but there is no manager to have bound it"
+        );
+        // The two modes are exclusive by construction (see the module docs):
+        // recording mode always releases the live binding first.
+        debug_assert!(
+            !(self.listener.is_some() && self.bound.is_some()),
+            "recording mode and a live binding at the same time"
+        );
+    }
+
+    /// Drop every tap the moment macOS stops trusting this process.
+    ///
+    /// Without the grant a tap cannot deliver anything, and leaving it
+    /// installed is actively harmful — see `TRUST_CHECK`. The next `apply`
+    /// (settings, or the Accessibility section's retry) builds a fresh one.
+    fn check_trust(&mut self) {
+        if self.manager.is_none() && self.listener.is_none() {
+            return;
+        }
+        if self.trust_checked.elapsed() < TRUST_CHECK {
+            return;
+        }
+        self.trust_checked = Instant::now();
+        if accessibility_granted() {
+            return;
+        }
+
+        log::warn!(
+            "talkie: Accessibility was revoked while the shortcut was bound; releasing the keyboard"
+        );
+        self.unbind();
+        self.listener = None;
+        self.manager = None;
+        debug_assert!(self.bound.is_none(), "unbind left a binding behind");
+    }
     fn handle(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Bind { accelerator, reply } => {
@@ -207,6 +280,7 @@ impl Engine {
     /// Bind `wanted`, dropping any previous binding first.
     fn rebind(&mut self) -> Result<(), String> {
         self.unbind();
+        debug_assert!(self.bound.is_none(), "unbind left a binding behind");
 
         let accelerator = self.wanted.trim().to_string();
         if accelerator.is_empty() {
@@ -236,6 +310,8 @@ impl Engine {
             return Ok(());
         }
 
+        // A fresh manager means a fresh tap, whose trust starts from now.
+        self.trust_checked = Instant::now();
         let id = self
             .manager()?
             .register(hotkey)
@@ -260,8 +336,10 @@ impl Engine {
         // shortcut in order to re-record it would also start a capture, and
         // blocking mode would eat the very keys being recorded.
         self.unbind();
+        debug_assert!(self.bound.is_none(), "unbind left a binding behind");
 
         let listener = KeyboardListener::new().map_err(|e| e.to_string())?;
+        self.trust_checked = Instant::now();
         self.listener = Some(listener);
         Ok(())
     }
@@ -270,6 +348,7 @@ impl Engine {
         if self.listener.take().is_none() {
             return;
         }
+        debug_assert!(self.listener.is_none(), "take left the listener in place");
         // `wanted` is whatever the recorder just saved, because `set_settings`
         // calls `apply` before the UI stops recording.
         if let Err(e) = self.rebind() {

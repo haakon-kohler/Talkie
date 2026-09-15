@@ -8,12 +8,15 @@
 //! immediately; the microphone opens, the model runs, and the file is written on
 //! a worker, with `RECORDER_STATE` events narrating the transitions.
 
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use talkie_shared::{events, ModelStatus, RecorderState};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::audio_toolkit::constants::{MAX_CAPTURE_SAMPLES, SAMPLE_RATE};
 use crate::audio_toolkit::vad::{
     SileroVad, SmoothedVad, VAD_HANGOVER_FRAMES, VAD_ONSET_FRAMES, VAD_PREFILL_FRAMES,
     VAD_THRESHOLD,
@@ -26,7 +29,17 @@ use crate::{hooks, models, note, sounds, tray};
 /// Captures shorter than this are treated as a slip of the finger — a
 /// double-tap on the shortcut, a key held for a moment — and dropped without
 /// running the model.
-const MIN_CAPTURE_SAMPLES: usize = 16000 / 4; // 250 ms at 16 kHz
+const MIN_CAPTURE_SAMPLES: usize = SAMPLE_RATE as usize / 4; // 250 ms
+const _: () = assert!(
+    MIN_CAPTURE_SAMPLES < MAX_CAPTURE_SAMPLES,
+    "the shortest capture worth keeping must fit inside the longest allowed"
+);
+
+/// How long a capture waits for the first microphone samples before giving
+/// up. Bluetooth headsets can take a second or two; a device that delivers
+/// nothing in this long is not going to, and a thread parked on it forever
+/// would hold the capture in `Recording` with no way out.
+const MIC_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct Recorder {
     app: AppHandle,
@@ -49,19 +62,47 @@ impl Recorder {
         *self.state.lock().expect("recorder state mutex poisoned")
     }
 
-    fn set_state(&self, next: RecorderState) {
-        *self.state.lock().expect("recorder state mutex poisoned") = next;
+    /// Move from `from` to `next`, but only if the machine is still at `from`.
+    ///
+    /// Every transition goes through here so two presses in the same instant
+    /// cannot both win: the check and the change happen under one lock.
+    fn transition(&self, from: RecorderState, next: RecorderState) -> bool {
+        debug_assert!(
+            matches!(
+                (from, next),
+                (RecorderState::Idle, RecorderState::Recording)
+                    | (RecorderState::Recording, RecorderState::Transcribing)
+                    | (RecorderState::Recording, RecorderState::Idle)
+                    | (RecorderState::Transcribing, RecorderState::Idle)
+                    | (RecorderState::Idle, RecorderState::Idle)
+            ),
+            "no such transition: {from:?} -> {next:?}"
+        );
+        {
+            let mut guard = self.state.lock().expect("recorder state mutex poisoned");
+            if *guard != from {
+                return false;
+            }
+            *guard = next;
+        }
         let _ = self.app.emit(events::RECORDER_STATE, next);
         tray::set_state(&self.app, next);
+        true
     }
 
     /// Report a failure the only way a silent app can: an event the UI may be
     /// listening to, plus the log. Never panics the capture path.
-    fn fail(&self, error: anyhow::Error) {
+    ///
+    /// `from` is the state the failing path believes it is in. If the machine
+    /// has moved on — a stop arrived while the start was still failing — the
+    /// newer path owns the state and this one only logs.
+    fn fail(&self, from: RecorderState, error: anyhow::Error) {
         let message = format!("{error:#}");
         log::error!("talkie: {message}");
         let _ = self.app.emit(events::CAPTURE_FAILED, message);
-        self.set_state(RecorderState::Idle);
+        if !self.transition(from, RecorderState::Idle) {
+            log::warn!("talkie: capture failed in {from:?} but the recorder had already moved on");
+        }
     }
 
     /// What the shortcut does on a press when push-to-talk is off.
@@ -81,21 +122,27 @@ impl Recorder {
             return;
         }
         if models::status(&self.app) != ModelStatus::Ready {
-            self.fail(anyhow!(
-                // COPY: capture.no_model
-                "speech model not yet installed — finish first run to download it"
-            ));
+            self.fail(
+                RecorderState::Idle,
+                anyhow!(
+                    // COPY: capture.no_model
+                    "speech model not yet installed — finish first run to download it"
+                ),
+            );
             return;
         }
 
         // Claim the state before the worker starts so a second press cannot
-        // open the microphone twice.
-        self.set_state(RecorderState::Recording);
+        // open the microphone twice. Losing the claim means the other press
+        // is already doing this.
+        if !self.transition(RecorderState::Idle, RecorderState::Recording) {
+            return;
+        }
 
         let this = Arc::clone(self);
         std::thread::spawn(move || {
             if let Err(e) = this.open_and_start() {
-                this.fail(e);
+                this.fail(RecorderState::Recording, e);
             }
         });
     }
@@ -142,11 +189,38 @@ impl Recorder {
 
         // Chime only once samples are actually flowing, so the sound never
         // promises a recording the hardware has not begun.
-        let _ = ready.recv();
+        match ready.recv_timeout(MIC_READY_TIMEOUT) {
+            Ok(()) => {}
+            // The consumer dropped the acknowledgement: a stop got there
+            // first and the capture is already being finished elsewhere.
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(RecvTimeoutError::Timeout) => {
+                // Take the consumer out of recording mode before reporting, or
+                // it would keep collecting frames for a capture nobody will
+                // ever stop.
+                self.discard_capture();
+                return Err(anyhow!(
+                    "the microphone delivered no audio for {}s",
+                    MIC_READY_TIMEOUT.as_secs()
+                ));
+            }
+        }
         if self.settings_snapshot().play_sounds {
             sounds::play_start();
         }
         Ok(())
+    }
+
+    /// Stop the consumer and throw away whatever it collected.
+    fn discard_capture(&self) {
+        let Ok(guard) = self.audio.lock() else {
+            return;
+        };
+        if let Some(recorder) = guard.as_ref() {
+            if let Err(e) = recorder.stop() {
+                log::warn!("talkie: could not stop an abandoned capture: {e}");
+            }
+        }
     }
 
     /// Resolve the configured microphone, falling back to the system default.
@@ -171,10 +245,9 @@ impl Recorder {
 
     /// End a capture and run the pipeline on it.
     pub fn stop(self: &Arc<Self>) {
-        if self.state() != RecorderState::Recording {
+        if !self.transition(RecorderState::Recording, RecorderState::Transcribing) {
             return;
         }
-        self.set_state(RecorderState::Transcribing);
 
         let this = Arc::clone(self);
         std::thread::spawn(move || {
@@ -182,8 +255,11 @@ impl Recorder {
                 sounds::play_stop();
             }
             match this.finish_capture() {
-                Ok(()) => this.set_state(RecorderState::Idle),
-                Err(e) => this.fail(e),
+                Ok(()) => {
+                    let moved = this.transition(RecorderState::Transcribing, RecorderState::Idle);
+                    debug_assert!(moved, "nothing else may leave Transcribing");
+                }
+                Err(e) => this.fail(RecorderState::Transcribing, e),
             }
         });
     }
@@ -201,6 +277,14 @@ impl Recorder {
                 .stop()
                 .map_err(|e| anyhow!("could not stop the recording: {e}"))?
         };
+
+        // The consumer caps what it keeps; anything longer here means the cap
+        // was bypassed and the model is about to be handed unbounded audio.
+        debug_assert!(
+            samples.len() <= MAX_CAPTURE_SAMPLES,
+            "capture of {} samples exceeds the cap of {MAX_CAPTURE_SAMPLES}",
+            samples.len()
+        );
 
         // VAD may legitimately return nothing (a capture of pure silence), and
         // a stray tap produces a handful of frames. Neither is worth a model

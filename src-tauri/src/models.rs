@@ -10,6 +10,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
@@ -67,6 +68,20 @@ fn emit(app: &AppHandle, progress: ModelProgress) {
 /// Download, verify, and unpack the model, emitting `MODEL_PROGRESS` as it goes.
 /// Returns early — and cheaply — if the model is already on disk.
 pub async fn download(app: AppHandle) -> Result<()> {
+    /// One 456 MB stream at a time. Two clicks on the button used to start two
+    /// downloads into the same `.part` file.
+    static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+    struct Claim;
+    impl Drop for Claim {
+        fn drop(&mut self) {
+            IN_FLIGHT.store(false, Ordering::SeqCst);
+        }
+    }
+    if IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        return Err(anyhow!("the model is already downloading"));
+    }
+    let _claim = Claim;
+
     if status(&app) == ModelStatus::Ready {
         emit(
             &app,
@@ -216,6 +231,10 @@ fn extract(archive: &Path, dir: &Path) -> Result<()> {
         fs::remove_dir_all(&target)?;
     }
     fs::rename(&source, &target)?;
+    debug_assert!(
+        target.is_dir(),
+        "rename succeeded but the model directory is missing"
+    );
 
     if staging.exists() {
         let _ = fs::remove_dir_all(&staging);

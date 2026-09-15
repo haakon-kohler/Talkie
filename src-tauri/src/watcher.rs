@@ -39,6 +39,11 @@ use crate::settings::SettingsState;
 /// at the end of it beats reading four times and emitting three no-ops.
 const SETTLE: Duration = Duration::from_millis(150);
 
+/// The most settle periods one flurry may extend itself by before the file is
+/// read anyway. A folder that never goes quiet — a sync client churning next
+/// to the note — must not starve the editor of updates forever.
+const MAX_SETTLE_ROUNDS: usize = 20;
+
 /// The live watch, managed as Tauri state.
 pub struct NoteWatcher {
     /// Dropping the previous watcher is what stops it, so re-arming is just a
@@ -85,6 +90,10 @@ impl NoteWatcher {
 
 /// Register the watcher state. Called once, from `lib.rs`, before `arm`.
 pub fn init(app: &AppHandle) {
+    assert!(
+        app.try_state::<NoteWatcher>().is_none(),
+        "the note watcher was registered twice"
+    );
     app.manage(NoteWatcher::new());
 }
 
@@ -129,8 +138,12 @@ pub fn arm(app: &AppHandle) -> Result<()> {
                     continue;
                 }
                 // Drain the rest of the flurry before reading: keep swallowing
-                // events until SETTLE passes with nothing new.
-                while rx.recv_timeout(SETTLE).is_ok() {}
+                // events until SETTLE passes with nothing new, or the bound
+                // is hit.
+                let mut rounds = 0;
+                while rounds < MAX_SETTLE_ROUNDS && rx.recv_timeout(SETTLE).is_ok() {
+                    rounds += 1;
+                }
                 report(&handle, &watched);
             }
         })

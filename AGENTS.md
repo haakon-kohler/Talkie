@@ -102,22 +102,49 @@ src-tauri/src/
   **Accessibility permission**, which the app now asks for in onboarding; the
   earlier "no accessibility permission" stance is gone. Talkie still never types
   into another app.
-- **`cargo tauri dev` cannot hold the Accessibility grant.** The dev binary is a
-  bare executable with no `Info.plist` and no bundle id, launched as a child of
-  the terminal, so macOS attributes the request to the terminal and adding
-  `target/debug/talkie` to the pane does nothing. Test the hotkey against a
-  bundle instead:
+- **`cargo tauri dev` cannot hold the Accessibility or Microphone grant.** The
+  dev binary is a bare executable with no `Info.plist` and no bundle id,
+  launched as a child of the terminal, so macOS attributes the request to the
+  terminal and adding `target/debug/talkie` to the pane does nothing. Test
+  either permission against a bundle instead:
 
   ```sh
   cargo tauri build --debug --bundles app
-  codesign --force --deep --sign - target/debug/bundle/macos/Talkie.app
   open target/debug/bundle/macos/Talkie.app
   ```
 
-  The `codesign` step matters: Tauri leaves the bundle linker-signed with its
-  `Info.plist` unbound, which gives TCC nothing stable to key on. After it, the
-  identity is `com.haakonkohler.talkie`. The grant still dies on each rebuild
-  (the code hash changes) — remove the row and re-add it.
+  `tauri.conf.json` sets `signingIdentity: "-"` so the bundler ad-hoc signs
+  the app itself, binding the `Info.plist` and giving it the identity
+  `com.haakonkohler.talkie`; without that the bundle is only linker-signed
+  under a random identifier and TCC has nothing stable to key on. The
+  hardened runtime is on, so the microphone also needs
+  `src-tauri/entitlements.plist`: a hardened-runtime app without the
+  `audio-input` entitlement is refused the microphone, prompt or not. Both
+  grants still die on each rebuild:
+  an ad-hoc signature's designated requirement is the code hash, and TCC keeps
+  the stale row with its switch shown *on* while refusing the new build.
+  `tccutil reset Microphone com.haakonkohler.talkie` (and `Accessibility`)
+  clears it. Only a certificate — Developer ID, or at least an Apple
+  Development one — makes a grant survive rebuilds, and there is none yet.
+  Set `APPLE_SIGNING_IDENTITY` to use one; it overrides the config.
+- **Quit Talkie before rebuilding the bundle or running `tccutil reset`.**
+  Revoking Accessibility under a running instance does not silence its event
+  tap: WindowServer refuses every event the tap returns ("Sender is
+  prohibited from synthesizing events"), disables the tap, `handy-keys`
+  re-enables it from the callback, and the two ping-pong at over 100 Hz until
+  the machine hangs. That is what froze this Mac on 2026-09-12 — a rebuild
+  and a `tccutil reset` while the 15:31 build was still running. The engine
+  thread now drops its tap within five seconds of losing the grant
+  (`shortcut::TRUST_CHECK`), which bounds the damage but is not a reason to
+  rely on it.
+- **When trying to build a new version make sure to quit the existing
+  instance because duplicate instances are automatically closed.** The
+  single-instance guard (`tauri-plugin-single-instance`, registered first in
+  `lib.rs`) keys on the bundle identifier via
+  `/tmp/com_haakonkohler_talkie_si.sock`, so a fresh debug bundle or
+  `cargo tauri dev` launched beside a running Talkie hands off to the running
+  one — it pops the notepad — and exits before it builds anything. Your new
+  build never ran; the old one is still what is answering the shortcut.
 - **`data-wasm-opt-params` in `ui/index.html` is load-bearing.** Release builds
   only: `wasm-opt` 123 validates its input against MVP unless told otherwise and
   rejects wasm-bindgen's `memory.copy` with `Fatal: error validating input`. The

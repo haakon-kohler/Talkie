@@ -111,6 +111,11 @@ struct Autosave {
     editor: Rc<RefCell<Option<Editor>>>,
     /// Unsaved local edits. Also the flag that makes an external change wait.
     dirty: Rc<Cell<bool>>,
+    /// Set while Talkie itself is changing the document. CodeMirror reports a
+    /// `setDoc` or an insert through the same listener as a keystroke; without
+    /// this every reload would count as an edit, mark the document dirty, and
+    /// write the file straight back 600 ms later.
+    applying: Rc<Cell<bool>>,
     timer: Rc<Cell<Option<TimeoutHandle>>>,
     /// Empty unless a save failed.
     trouble: RwSignal<String>,
@@ -121,6 +126,7 @@ impl Autosave {
         Self {
             editor: Rc::new(RefCell::new(None)),
             dirty: Rc::new(Cell::new(false)),
+            applying: Rc::new(Cell::new(false)),
             timer: Rc::new(Cell::new(None)),
             trouble: RwSignal::new(String::new()),
         }
@@ -128,6 +134,13 @@ impl Autosave {
 
     /// The document changed. Restart the clock.
     fn touch(&self) {
+        debug_assert!(
+            self.editor.borrow().is_some(),
+            "a change before the editor mounted"
+        );
+        if self.applying.get() {
+            return;
+        }
         self.dirty.set(true);
         if let Some(pending) = self.timer.take() {
             pending.clear();
@@ -139,6 +152,20 @@ impl Autosave {
             // No timer means no autosave, which is worse than saving eagerly.
             Err(_) => self.flush(),
         }
+    }
+
+    /// Run `f` against the mounted editor as Talkie's own change, not the
+    /// user's. CodeMirror calls the change listener synchronously inside the
+    /// dispatch, so the flag is back off before this returns.
+    fn apply_own_change(&self, f: impl FnOnce(&Editor)) {
+        let editor = self.editor.borrow();
+        let Some(editor) = editor.as_ref() else {
+            return;
+        };
+        debug_assert!(!self.applying.get(), "nested programmatic change");
+        self.applying.set(true);
+        f(editor);
+        self.applying.set(false);
     }
 
     /// Write now, if there is anything to write.
@@ -194,41 +221,41 @@ impl Autosave {
     /// this happens. Their keystrokes stay, the spoken entry stays, and nothing
     /// has to be thrown away to reconcile the two.
     fn reconcile(&self, sent: &str, saved: &str) {
-        let editor = self.editor.borrow();
-        let Some(editor) = editor.as_ref() else {
-            return;
-        };
-        match document::inserted_at_head(sent, saved) {
+        let dirty = self.dirty.get();
+        self.apply_own_change(|editor| match document::inserted_at_head(sent, saved) {
             Some(inserted) => {
                 let at = document::insertion_offset(&editor.doc());
                 editor.insert_and_reveal(at, inserted);
             }
             // Not a capture after all. Only safe with nothing unsaved.
-            None if !self.dirty.get() => editor.set_doc(saved),
+            None if !dirty => editor.set_doc(saved),
             None => {}
-        }
+        });
     }
-}
 
-/// Apply what is now on disk.
-///
-/// Text added at the top — the shape of a silent capture — is applied as an
-/// insert, so the cursor and the undo history survive it. Anything else is a
-/// replacement.
-fn apply(editor: &Editor, incoming: &str) {
-    let current = editor.doc();
-    // Compared normalised: the trailing newline the document contract puts on
-    // disk is not a change the editor needs to hear about, and treating it as
-    // one would edit the document and take the cursor with it.
-    if document::normalized(&current) == incoming {
-        return;
-    }
-    match document::inserted_at_head(&current, incoming) {
-        Some(inserted) => {
-            let at = document::insertion_offset(&current);
-            editor.insert_and_reveal(at, inserted);
-        }
-        None => editor.set_doc(incoming),
+    /// Apply what is now on disk.
+    ///
+    /// Text added at the top — the shape of a silent capture — is applied as
+    /// an insert, so the cursor and the undo history survive it. Anything else
+    /// is a replacement.
+    fn apply(&self, incoming: &str) {
+        self.apply_own_change(|editor| {
+            let current = editor.doc();
+            // Compared normalised: the trailing newline the document contract
+            // puts on disk is not a change the editor needs to hear about, and
+            // treating it as one would edit the document and take the cursor
+            // with it.
+            if document::normalized(&current) == incoming {
+                return;
+            }
+            match document::inserted_at_head(&current, incoming) {
+                Some(inserted) => {
+                    let at = document::insertion_offset(&current);
+                    editor.insert_and_reveal(at, inserted);
+                }
+                None => editor.set_doc(incoming),
+            }
+        });
     }
 }
 
@@ -249,9 +276,7 @@ fn follow_external_changes(autosave: Autosave) {
             if autosave.dirty.get() {
                 return;
             }
-            if let Some(editor) = autosave.editor.borrow().as_ref() {
-                apply(editor, &text);
-            }
+            autosave.apply(&text);
         });
     });
 }

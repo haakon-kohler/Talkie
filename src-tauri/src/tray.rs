@@ -11,7 +11,7 @@ use crate::recorder::Recorder;
 use crate::windows;
 
 /// The tray item's id, so `set_state` can find it again.
-const TRAY_ID: &str = "talkie";
+pub(crate) const TRAY_ID: &str = "talkie";
 
 const ID_OPEN_NOTES: &str = "open_notes";
 const ID_RECORD: &str = "record";
@@ -19,6 +19,10 @@ const ID_SETTINGS: &str = "settings";
 const ID_QUIT: &str = "quit";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    assert!(
+        app.tray_by_id(TRAY_ID).is_none(),
+        "the tray was built twice"
+    );
     let open_notes = MenuItem::with_id(app, ID_OPEN_NOTES, "Notepad", true, None::<&str>)?;
     let record = MenuItem::with_id(app, ID_RECORD, "Record", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
@@ -64,6 +68,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             _ => {}
         })
         .build(app)?;
+    debug_assert!(
+        app.tray_by_id(TRAY_ID).is_some(),
+        "the tray built but cannot be found"
+    );
 
     Ok(())
 }

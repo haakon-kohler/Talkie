@@ -198,6 +198,13 @@ pub fn write_note(
         }
     };
 
+    // What goes to disk is what the editor gets back, byte for byte, or the
+    // next save would mistake the difference for someone else's capture.
+    debug_assert!(
+        document::normalized(&to_write) == to_write,
+        "reconcile returned text that is not in the on-disk shape"
+    );
+
     // Remembered before the write so the change notification it causes is
     // recognised as Talkie's own and never bounces back into the editor.
     watcher.remember(&to_write);
@@ -246,5 +253,13 @@ pub fn retry_shortcut(app: AppHandle) -> Result<(), String> {
 
 /// Convenience for `lib.rs`: seed the managed state at startup.
 pub fn manage_settings(app: &AppHandle, settings: Settings) {
+    assert!(
+        app.try_state::<SettingsState>().is_none(),
+        "settings state was registered twice"
+    );
+    debug_assert!(
+        !settings.note_path.trim().is_empty(),
+        "settings::load must resolve a note path before it is managed"
+    );
     app.manage(SettingsState(Mutex::new(settings)));
 }

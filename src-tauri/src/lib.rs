@@ -20,8 +20,9 @@ mod windows;
 
 use std::sync::Arc;
 
+use settings::SettingsState;
 use talkie_shared::WindowLabel;
-use tauri::{Manager, WindowEvent};
+use tauri::{AppHandle, Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,6 +31,12 @@ pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     tauri::Builder::default()
+        // Registered first on purpose: a second instance exits inside this
+        // plugin's init, before the store, tray, hotkey tap, or watcher exist.
+        // Two Talkies would otherwise both hold the shortcut and capture every
+        // utterance twice. macOS only dedupes launches of the *same bundle
+        // path*, so a debug bundle beside an installed copy slips through.
+        .plugin(tauri_plugin_single_instance::init(second_launch))
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
@@ -100,4 +107,38 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Talkie");
+}
+
+/// The running instance's side of a second launch.
+///
+/// The loser has already exited; the user clicked Talkie and wants it to
+/// appear, so show whichever window they should be looking at. No dialog:
+/// an "already running" alert would only explain something they never saw.
+fn second_launch(app: &AppHandle, argv: Vec<String>, _cwd: String) {
+    assert!(
+        !argv.is_empty(),
+        "a launch always carries its own executable path"
+    );
+    // The listener is armed during plugin init, but a relaunch cannot
+    // round-trip before `setup` has finished building the tray.
+    debug_assert!(
+        app.tray_by_id(tray::TRAY_ID).is_some(),
+        "second launch reached the primary before setup finished"
+    );
+
+    let onboarding_complete = app
+        .try_state::<SettingsState>()
+        .and_then(|state| state.0.lock().ok().map(|s| s.onboarding_complete))
+        .unwrap_or(true);
+    let label = if onboarding_complete {
+        WindowLabel::Editor
+    } else {
+        WindowLabel::Onboarding
+    };
+    if let Err(e) = windows::show(app, label) {
+        log::warn!(
+            "talkie: second launch could not show `{}`: {e}",
+            label.as_str()
+        );
+    }
 }

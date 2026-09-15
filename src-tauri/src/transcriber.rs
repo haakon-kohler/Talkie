@@ -11,6 +11,8 @@ use anyhow::{anyhow, Result};
 use transcribe_rs::onnx::parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity};
 use transcribe_rs::onnx::Quantization;
 
+use crate::audio_toolkit::constants::MAX_CAPTURE_SAMPLES;
+
 /// Owns the loaded engine. One capture runs at a time, so a mutex is the whole
 /// concurrency story.
 pub struct Transcriber {
@@ -27,6 +29,11 @@ impl Transcriber {
     /// Transcribe 16 kHz mono samples. Blocking and CPU-bound — call it off the
     /// UI thread.
     pub fn transcribe(&self, model_dir: &Path, samples: Vec<f32>) -> Result<String> {
+        assert!(!samples.is_empty(), "transcribe called with no audio");
+        debug_assert!(
+            samples.len() <= MAX_CAPTURE_SAMPLES,
+            "the recorder must cap a capture before it reaches the model"
+        );
         let mut guard = self
             .engine
             .lock()

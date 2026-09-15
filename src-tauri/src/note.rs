@@ -65,8 +65,16 @@ pub fn write(note_path: &Path, text: &str) -> Result<()> {
     }
 
     let text = document::normalized(text);
+    debug_assert!(
+        text.is_empty() || text.ends_with('\n'),
+        "the document contract's trailing newline was not applied"
+    );
 
     let temp = temp_sibling(note_path);
+    debug_assert!(
+        temp != note_path,
+        "the scratch file must not be the note itself"
+    );
     fs::write(&temp, text.as_bytes())
         .with_context(|| format!("could not write {temp:?} while saving the notes file"))?;
     fs::rename(&temp, note_path).with_context(|| {
