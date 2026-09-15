@@ -41,3 +41,8 @@ rodio = "0.21"
 vad-rs = { git = "https://github.com/cjpais/vad-rs", version = "0.1.6", default-features = false }
 transcribe-rs = { version = "0.3.8", features = ["onnx"] }
 tauri-plugin-single-instance = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Login item via SMAppService (macOS 13+). objc2 already ships with Tauri, so
+# this adds one framework crate, not a second Objective-C runtime.
+objc2-service-management = "0.3.2"

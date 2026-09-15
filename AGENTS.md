@@ -69,6 +69,7 @@ src-tauri/src/
   shortcut.rs       handy-keys engine thread: the global hotkey + the recorder
   note.rs           disk half of talkie.md: prepend a capture, read, atomic write
   hooks.rs          the plugin system: executables in app-data/hooks/, run at the edges of a capture
+  login_item.rs     Start at Login via SMAppService; macOS, not the store, is the truth for that switch
   watcher.rs        watches talkie.md for changes Talkie's editor did not make
   settings.rs       tauri-plugin-store; the host owns settings, the UI never caches them
   windows.rs        show/hide + the macOS Accessory/Regular Dock dance
@@ -127,6 +128,11 @@ src-tauri/src/
   clears it. Only a certificate — Developer ID, or at least an Apple
   Development one — makes a grant survive rebuilds, and there is none yet.
   Set `APPLE_SIGNING_IDENTITY` to use one; it overrides the config.
+- **Start at Login only works from a bundle.** `login_item.rs` registers the
+  app with `SMAppService` (macOS 13+, hence `minimumSystemVersion`), which
+  needs a bundle identity; the `cargo tauri dev` binary reports `NotFound`
+  and switching it on fails with the system's own message. Switching it off
+  in that state is a no-op, so every other setting still saves in dev.
 - **Quit Talkie before rebuilding the bundle or running `tccutil reset`.**
   Revoking Accessibility under a running instance does not silence its event
   tap: WindowServer refuses every event the tap returns ("Sender is

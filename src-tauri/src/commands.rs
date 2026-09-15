@@ -10,11 +10,15 @@ use crate::recorder::Recorder;
 use crate::settings::{self, SettingsState};
 use crate::shortcut::ShortcutState;
 use crate::watcher::NoteWatcher;
-use crate::{models, note, shortcut, watcher, windows};
+use crate::{login_item, models, note, shortcut, watcher, windows};
 
 #[tauri::command]
 pub fn get_settings(state: State<'_, SettingsState>) -> Settings {
-    state.0.lock().expect("settings mutex poisoned").clone()
+    let mut guard = state.0.lock().expect("settings mutex poisoned");
+    // The login item can be switched off in System Settings behind Talkie's
+    // back; macOS, not the store, knows whether it is on.
+    guard.launch_at_login = login_item::enabled();
+    guard.clone()
 }
 
 #[tauri::command]
@@ -31,6 +35,9 @@ pub fn set_settings(
     shortcut::validate(&settings.shortcut)?;
     settings.note_path = settings.note_path.trim().to_string();
     note::validate(&settings.note_path)?;
+    // Same reasoning for the login item: register it first, and only persist
+    // a switch macOS actually honoured.
+    login_item::apply(settings.launch_at_login).map_err(|e| format!("{e:#}"))?;
 
     let (shortcut_changed, note_path_changed) = {
         let mut guard = state.0.lock().expect("settings mutex poisoned");

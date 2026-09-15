@@ -7,6 +7,7 @@
 mod audio_toolkit;
 mod commands;
 mod hooks;
+mod login_item;
 mod models;
 mod note;
 mod recorder;

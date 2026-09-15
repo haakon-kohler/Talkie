@@ -61,6 +61,7 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> Settings {
     if settings.note_path.trim().is_empty() {
         settings.note_path = default_note_path();
     }
+    settings.launch_at_login = crate::login_item::enabled();
 
     // A fresh install has nothing to migrate; its first save stamps the schema.
     if had_blob && schema < SCHEMA {
