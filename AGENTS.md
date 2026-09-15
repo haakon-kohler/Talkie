@@ -69,6 +69,7 @@ src-tauri/src/
   shortcut.rs       handy-keys engine thread: the global hotkey + the recorder
   note.rs           disk half of talkie.md: prepend a capture, read, atomic write
   hooks.rs          the plugin system: executables in app-data/hooks/, run at the edges of a capture
+  journal.rs        the last ten warnings and panics, in app-data/debug.log; `Talkie --debug-log` prints it
   login_item.rs     Start at Login via SMAppService; macOS, not the store, is the truth for that switch
   watcher.rs        watches talkie.md for changes Talkie's editor did not make
   settings.rs       tauri-plugin-store; the host owns settings, the UI never caches them
@@ -151,6 +152,15 @@ src-tauri/src/
   `cargo tauri dev` launched beside a running Talkie hands off to the running
   one — it pops the notepad — and exits before it builds anything. Your new
   build never ran; the old one is still what is answering the shortcut.
+- **Bundled Talkie has no stderr; read `debug.log` instead.** Every
+  `log::warn!`/`error!` and every panic lands in a ten-line
+  `~/Library/Application Support/com.haakonkohler.talkie/debug.log`, the
+  file rewritten on each entry so a crash keeps its last line. Two severities
+  only: `warn` (handled, carried on) and `fatal` (panic). Print it with
+  `/Applications/Talkie.app/Contents/MacOS/Talkie --debug-log` — the flag
+  is answered before the single-instance guard, so it works while Talkie is
+  running. `open --args` will not show it; it needs a terminal. There is no
+  UI for it and there should not be one.
 - **`data-wasm-opt-params` in `ui/index.html` is load-bearing.** Release builds
   only: `wasm-opt` 123 validates its input against MVP unless told otherwise and
   rejects wasm-bindgen's `memory.copy` with `Fatal: error validating input`. The

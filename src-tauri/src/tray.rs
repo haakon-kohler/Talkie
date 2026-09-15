@@ -53,12 +53,12 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             ID_OPEN_NOTES => {
                 if let Err(e) = windows::show(app, WindowLabel::Editor) {
-                    eprintln!("talkie: could not open the editor window: {e}");
+                    log::warn!("talkie: could not open the editor window: {e}");
                 }
             }
             ID_SETTINGS => {
                 if let Err(e) = windows::show(app, WindowLabel::Settings) {
-                    eprintln!("talkie: could not open the settings window: {e}");
+                    log::warn!("talkie: could not open the settings window: {e}");
                 }
             }
             ID_RECORD => {

@@ -7,6 +7,7 @@
 mod audio_toolkit;
 mod commands;
 mod hooks;
+mod journal;
 mod login_item;
 mod models;
 mod note;
@@ -27,9 +28,23 @@ use tauri::{AppHandle, Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Every failure path reports through `log`; without a backend those lines
-    // vanish and a silent app stays silent about its own bugs.
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let context = tauri::generate_context!();
+    // The journal needs app-data before any app exists, so derive it the way
+    // Tauri's `app_data_dir` does: the platform data dir plus the identifier.
+    let data_dir = dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(&context.config().identifier);
+
+    // `Talkie --debug-log` prints the last ten problems and leaves, before
+    // the single-instance guard could hand this launch to a running Talkie.
+    if journal::handle_flag(&data_dir) {
+        return;
+    }
+
+    // Every failure path reports through `log`; the journal keeps the last
+    // ten and tees the rest to stderr, so a silent app is not silent about
+    // its own bugs.
+    journal::init(&data_dir);
 
     tauri::Builder::default()
         // Registered first on purpose: a second instance exits inside this
@@ -91,7 +106,7 @@ pub fn run() {
 
             if first_run {
                 if let Err(e) = windows::show(&handle, WindowLabel::Onboarding) {
-                    eprintln!("talkie: could not open onboarding: {e}");
+                    log::warn!("talkie: could not open onboarding: {e}");
                 }
             }
 
@@ -106,7 +121,7 @@ pub fn run() {
                 windows::sync_activation_policy(window.app_handle());
             }
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running Talkie");
 }
 
@@ -119,6 +134,10 @@ fn second_launch(app: &AppHandle, argv: Vec<String>, _cwd: String) {
     assert!(
         !argv.is_empty(),
         "a launch always carries its own executable path"
+    );
+    assert!(
+        !journal::flagged(&argv),
+        "`--debug-log` is answered before the guard and never reaches the primary"
     );
     // The listener is armed during plugin init, but a relaunch cannot
     // round-trip before `setup` has finished building the tray.
