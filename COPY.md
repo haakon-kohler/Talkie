@@ -24,8 +24,7 @@ Everything else in this file is in the app verbatim.
 | ID | Where it shows | Note |
 | --- | --- | --- |
 | `onboarding.model.installed` | Under "Speech model", once the model is on disk | In **settings** this is the only thing that section ever says, so it carries more weight than its length suggests |
-| `editor.trouble` | Bottom-right of the editor, when a save or a capture failed | Currently the host's raw error text |
-| `settings.note_path.*` | Under the Save button, when the notes path is refused | Working text, see the Notes file section |
+| `editor.trouble` | Bottom-right of the editor, when a save or a capture failed | `editor.trouble.conflict` is live; the rest still show the host's raw errors |
 | `onboarding.note` | Footnote under the first-run body | Empty, and nothing renders it yet |
 | `settings.note_path.hint` | Under the notes-file field | Empty |
 | `settings.shortcut.hint` | Under the shortcut field | Empty |
@@ -42,11 +41,11 @@ Heading (`onboarding.title`) — *live*
 
 > Talkie
 
-Lede (`onboarding.lede`) — *placeholder*
+Lede (`onboarding.lede`) — *live*
 
-> The modern notepad. 
+> The modern notepad.
 
-Body (`onboarding.body`) — *placeholder*
+Body (`onboarding.body`) — *live*
 
 > Press the shortcut and you can record directly to a markdown notepad. Want to enable obsidian or openclaw integration? Point the document at the home folder!
 
@@ -67,7 +66,7 @@ whenever the binary changes, so settings has to be able to ask for it too.
 
 Body (`onboarding.accessibility.body`) — *live*
 
-> This setting allows Talkie to use specific modifier keys as your shortcut button (like the right Option key). We don't look at any information in other apps. 
+> This setting allows Talkie to use specific modifier keys as your shortcut button (like the right Option key). We don't look at any information in other apps.
 
 Button (`onboarding.accessibility.cta`) — *live*
 
@@ -148,7 +147,7 @@ Hint (`settings.note_path.hint`) — *placeholder*
 
 > 
 
-Refusals — *placeholder*. Save checks the path the way a capture would use it:
+Refusals — *live*. Save checks the path the way a capture would use it:
 it has to be a full path, not a folder, and its folder has to be creatable and
 writable. The folder is created on Save so the failure shows up now, not on
 the first capture. `{path}` is what was typed, `{folder}` its parent, `{e}` the
@@ -158,7 +157,8 @@ underlying error.
 | --- | --- |
 | `settings.note_path.empty` | The notes file needs a path. |
 | `settings.note_path.relative` | `{path}` is not a full path — it has to start with / or ~/. |
-| `settings.note_path.folder` | `{path}` is a folder; the notes file has to be a file inside one. |
+| `settings.note_path.folder` | `{path}` is a folder. The notes file should be a file inside a folder. |
+| `settings.note_path.no_folder` | `{path}` has no folder to live in. |
 | `settings.note_path.unwritable` | Could not create the folder {folder}: {e} · Could not write in the folder {folder}: {e} |
 
 ### Shortcut
@@ -191,10 +191,10 @@ its own (right ⌘) is a legal shortcut and keeps its side.
 
 `settings.push_to_talk.label` — *live*. The control is **inverted**: push-to-talk
 is the default, so this box is the way out of it and ships unchecked. The stored
-setting is still `push_to_talk`; only the checkbox reads backwards, which is why
-the label says "Turn Off".
+setting is still `push_to_talk`; only the checkbox reads backwards, so the label
+leads with "Toggle Record" and the parenthetical spells out what it turns off.
 
-> Turn Off Push-to-Talk (Toggle Record)
+> Toggle Record (Turn Off Push-to-Talk)
 
 `settings.play_sounds.label` — *live*
 
@@ -222,6 +222,14 @@ the label says "Turn Off".
 
 > Could not save: {e}
 
+### Speech model
+
+Heading (`settings.model.label`) — *live*. The section mounts the same model
+block as onboarding's step 3, so the `onboarding.model.*` strings above show
+here too.
+
+> Speech model
+
 ---
 
 ## Editor window
@@ -239,7 +247,12 @@ Save failure (`editor.trouble`) — *placeholder*
 
 The editor has no chrome by design, with one exception: a save that failed has
 to say so, or the window quietly becomes a text box that eats your writing. The
-string shown is currently the host's raw error.
+string shown is the host's raw error, except for the one case a user can
+actually cause:
+
+Conflict (`editor.trouble.conflict`) — *live*
+
+> The notes file changed outside Talkie, so this text was not saved.
 
 The same strip shows a failed capture (the `capture.*` sentences below) until
 the next capture starts. A save failure takes precedence if both are pending.

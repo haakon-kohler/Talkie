@@ -119,30 +119,30 @@ pub fn resolve(note_path: &str) -> PathBuf {
 pub fn validate(note_path: &str) -> Result<(), String> {
     let note_path = note_path.trim();
     if note_path.is_empty() {
-        // COPY: settings.note_path.empty — placeholder
+        // COPY: settings.note_path.empty
         return Err("The notes file needs a path.".to_string());
     }
 
     let path = resolve(note_path);
     if !path.is_absolute() {
-        // COPY: settings.note_path.relative — placeholder
+        // COPY: settings.note_path.relative
         return Err(format!(
             "`{note_path}` is not a full path — it has to start with / or ~/."
         ));
     }
     if path.is_dir() {
-        // COPY: settings.note_path.folder — placeholder
+        // COPY: settings.note_path.folder
         return Err(format!(
-            "`{}` is a folder; the notes file has to be a file inside one.",
-            path.display()
+            "`{note_path}` is a folder. The notes file should be a file inside a folder."
         ));
     }
 
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
+        // COPY: settings.note_path.no_folder
         .ok_or_else(|| format!("`{note_path}` has no folder to live in."))?;
-    // COPY: settings.note_path.unwritable — placeholder
+    // COPY: settings.note_path.unwritable
     fs::create_dir_all(parent)
         .map_err(|e| format!("Could not create the folder {}: {e}", parent.display()))?;
 

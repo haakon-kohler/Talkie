@@ -162,7 +162,7 @@ pub fn validate(accelerator: &str) -> Result<(), String> {
         .map_err(|e| format!("`{accelerator}` is not a valid shortcut: {e}"))?;
 
     if hotkey.modifiers.is_empty() {
-        // COPY: settings.shortcut.invalid — placeholder
+        // COPY: settings.shortcut.invalid
         return Err("A shortcut needs at least one modifier — ⌘, ⌥, ⌃ or ⇧.".to_string());
     }
     Ok(())

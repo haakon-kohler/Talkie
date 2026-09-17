@@ -1,8 +1,8 @@
 //! Talkie's Tauri host.
 //!
-//! Speak, and it lands in your notes: a global shortcut records, a local model
-//! transcribes, and the text is appended to one long markdown file. This module
-//! is the assembly point — the pipeline itself arrives in M1.
+//! The modern notepad. Using a global shortcut records, a local model
+//! transcribes, and then the text is appended to one long markdown file. This module
+//! is the assembly point while the pipeline itself arrives in M1.
 
 mod audio_toolkit;
 mod commands;

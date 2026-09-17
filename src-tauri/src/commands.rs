@@ -197,7 +197,7 @@ pub fn write_note(
 
     let to_write = match document::reconcile(&text, &on_disk, base.as_deref()) {
         document::Save::Write(text) => text,
-        // COPY: editor.trouble.conflict — placeholder
+        // COPY: editor.trouble.conflict
         document::Save::Conflict => {
             return Err(
                 "The notes file changed outside Talkie, so this text was not saved.".to_string(),

@@ -1,10 +1,7 @@
 //! The document contract, as code.
 //!
 //! `talkie.md` is public API: Obsidian indexes it, agents watch it, and the
-//! editor and the capture pipeline both write it. The shape of that file, and
-//! the rules for putting something new into it, are defined exactly once — here
-//! — because the host and the UI each need to apply them and two copies would
-//! drift.
+//! editor and the capture pipeline both write it. This defines all interactions with that file, on both the host and UI sides.
 //!
 //! ## The shape
 //!
@@ -24,11 +21,10 @@
 //!
 //! **Newest first.** A capture goes at the top, not the bottom, so scrolling
 //! down walks backwards through time and the thing you just said is the thing
-//! you are looking at. Everything below follows from that one decision.
+//! you are looking at.
 //!
 //! "The top" is not byte zero: YAML frontmatter and a leading `#` title stay
-//! where they are. Inserting above frontmatter would silently stop it being
-//! frontmatter, which would break the vault the file is sitting in.
+//! where they are. Inserting above frontmatter would break Obsidian integration.
 
 use serde::{Deserialize, Serialize};
 

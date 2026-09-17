@@ -86,7 +86,7 @@ pub fn SettingsPage() -> impl IntoView {
                         }
                     />
                     // COPY: settings.push_to_talk.label
-                    <span>"Turn Off Push-to-Talk (Toggle Record)"</span>
+                    <span>"Toggle Record (Turn Off Push-to-Talk)"</span>
                 </label>
 
                 <label class="toggle">

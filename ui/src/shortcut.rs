@@ -124,7 +124,7 @@ pub fn ShortcutField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
         if recording.get() {
             let live = preview.get();
             return if live.is_empty() {
-                // COPY: settings.shortcut.recording — placeholder
+                // COPY: settings.shortcut.recording
                 "Press keys…".to_string()
             } else {
                 live
@@ -134,7 +134,7 @@ pub fn ShortcutField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
             Some(shortcut) if !shortcut.trim().is_empty() => {
                 talkie_shared::format_shortcut(&shortcut)
             }
-            // COPY: settings.shortcut.empty — placeholder
+            // COPY: settings.shortcut.empty
             _ => "None".to_string(),
         }
     };

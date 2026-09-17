@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Speak, and it lands in your notes."
+description = "The modern notepad."
 
 [lib]
 # The `_lib` suffix keeps the lib name distinct from the bin name on Windows.
