@@ -3,14 +3,16 @@
 
 use std::sync::{Arc, Mutex};
 
-use talkie_shared::{document, events, ModelStatus, RecorderState, Settings, WindowLabel};
+use talkie_shared::{
+    document, events, MicrophoneInfo, ModelStatus, RecorderState, Settings, WindowLabel,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::recorder::Recorder;
 use crate::settings::{self, SettingsState};
 use crate::shortcut::ShortcutState;
 use crate::watcher::NoteWatcher;
-use crate::{login_item, models, note, shortcut, watcher, windows};
+use crate::{login_item, models, note, panel, shortcut, watcher, windows};
 
 #[tauri::command]
 pub fn get_settings(state: State<'_, SettingsState>) -> Settings {
@@ -256,6 +258,48 @@ pub fn open_accessibility_settings() -> Result<(), String> {
 #[tauri::command]
 pub fn retry_shortcut(app: AppHandle) -> Result<(), String> {
     shortcut::apply(&app).map_err(|e| format!("{e:#}"))
+}
+
+/// Let the user point at the notes file with the native panel instead of
+/// typing a path.
+///
+/// Returns the path the way the settings form should show it, or `None` for a
+/// cancelled panel. Nothing is persisted here: the form puts the answer in the
+/// field, and Save runs it through the same validation as a typed path.
+#[tauri::command]
+pub async fn pick_note_path(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+) -> Result<Option<String>, String> {
+    let current = {
+        let guard = state.0.lock().expect("settings mutex poisoned");
+        note::resolve(&guard.note_path)
+    };
+    let chosen = panel::choose_note_path(&app, &current)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(chosen.map(|path| path.to_string_lossy().into_owned()))
+}
+
+/// The input devices the OS reports right now.
+///
+/// Enumerated on every call rather than cached: there is no device-change
+/// notification to hang a cache on, and a headset plugged in while settings is
+/// open should show up the next time the list is opened.
+#[tauri::command]
+pub async fn list_microphones() -> Result<Vec<MicrophoneInfo>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let devices = crate::audio_toolkit::list_input_devices().map_err(|e| e.to_string())?;
+        Ok(devices
+            .into_iter()
+            .map(|d| MicrophoneInfo {
+                name: d.name,
+                is_default: d.is_default,
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Convenience for `lib.rs`: seed the managed state at startup.

@@ -1,12 +1,9 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 
 pub struct CpalDeviceInfo {
-    /// Populated for M3's microphone picker; the capture path only needs
-    /// `name` (to match the setting) and `device` (to open).
-    #[allow(dead_code)]
-    pub index: String,
+    /// The setting matches on this; the picker lists it.
     pub name: String,
-    #[allow(dead_code)]
+    /// The picker marks it; the capture path ignores it and asks cpal.
     pub is_default: bool,
     pub device: cpal::Device,
 }
@@ -17,12 +14,11 @@ pub fn list_input_devices() -> Result<Vec<CpalDeviceInfo>, Box<dyn std::error::E
 
     let mut out = Vec::<CpalDeviceInfo>::new();
 
-    for (index, device) in host.input_devices()?.enumerate() {
+    for device in host.input_devices()? {
         let name = device.name().unwrap_or_else(|_| "Unknown".into());
         let is_default = Some(name.clone()) == default_name;
 
         out.push(CpalDeviceInfo {
-            index: index.to_string(),
             name,
             is_default,
             device,

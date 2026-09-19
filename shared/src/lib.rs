@@ -54,6 +54,12 @@ pub mod commands {
     /// Bind the shortcut again — the way back from a grant that arrived after
     /// the app had already given up on the keyboard.
     pub const RETRY_SHORTCUT: &str = "retry_shortcut";
+    /// Open the native file panel for the notes file. Resolves to the chosen
+    /// path, or `None` when the panel was cancelled; nothing is saved either
+    /// way — the settings form still owns the write.
+    pub const PICK_NOTE_PATH: &str = "pick_note_path";
+    /// Every input device the OS reports right now, payload `Vec<MicrophoneInfo>`.
+    pub const LIST_MICROPHONES: &str = "list_microphones";
 }
 
 /// Event names for host → UI pushes. Namespaced so they can never collide with
@@ -156,6 +162,18 @@ impl Default for Settings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowArgs {
     pub label: WindowLabel,
+}
+
+/// One input device, as the microphone picker lists it.
+///
+/// Devices are matched by name and nothing else: cpal exposes no stable id, so
+/// two identically named USB microphones are one entry as far as the setting
+/// is concerned.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MicrophoneInfo {
+    pub name: String,
+    /// The one the OS would use when `Settings::microphone` is `None`.
+    pub is_default: bool,
 }
 
 /// Argument payload for `write_note`.

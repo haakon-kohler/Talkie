@@ -27,6 +27,11 @@ Everything else in this file is in the app verbatim.
 | `editor.trouble` | Bottom-right of the editor, when a save or a capture failed | `editor.trouble.conflict` is live; the rest still show the host's raw errors |
 | `onboarding.note` | Footnote under the first-run body | Empty, and nothing renders it yet |
 | `settings.note_path.hint` | Under the notes-file field | Empty |
+| `settings.note_path.browse` | The button beside the notes-file field | Working label |
+| `settings.note_path.panel_prompt` | The confirm button in the file panel itself | Working label |
+| `settings.microphone.label` | Above the microphone list | Working label |
+| `settings.microphone.default` | First entry in the microphone list | Working label |
+| `settings.microphone.missing` | The list entry for a saved microphone that is not plugged in | Working label; `{name}` is the device |
 | `settings.shortcut.hint` | Under the shortcut field | Empty |
 
 ---
@@ -160,6 +165,43 @@ underlying error.
 | `settings.note_path.folder` | `{path}` is a folder. The notes file should be a file inside a folder. |
 | `settings.note_path.no_folder` | `{path}` has no folder to live in. |
 | `settings.note_path.unwritable` | Could not create the folder {folder}: {e} · Could not write in the folder {folder}: {e} |
+
+Button beside the field (`settings.note_path.browse`) — *placeholder*, showing a
+working label
+
+> Choose…
+
+It opens a native panel that takes either a folder or a file: a folder means
+"`talkie.md` in here", a file means that file. The panel's own confirm button
+(`settings.note_path.panel_prompt`) — *placeholder*, showing a working label
+
+> Choose
+
+Cancelling the panel changes nothing; choosing fills the field, and Save checks
+it like a typed path.
+
+### Microphone
+
+Label (`settings.microphone.label`) — *placeholder*, showing a working label
+
+> Microphone
+
+First entry, the one that follows whatever macOS has selected
+(`settings.microphone.default`) — *placeholder*, showing a working label
+
+> System default
+
+A saved microphone that is not connected right now stays in the list, marked,
+so the setting is visible instead of silently reading as the default
+(`settings.microphone.missing`) — *placeholder*, showing a working label.
+`{name}` is the device.
+
+> {name} (not connected)
+
+The list is taken fresh each time it is opened, so a headset plugged in while
+settings is on screen shows up without reopening the window. Two microphones
+with the same name are one entry: macOS gives Talkie their names and nothing
+steadier.
 
 ### Shortcut
 

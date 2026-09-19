@@ -264,6 +264,35 @@ input[type="text"]:focus {
   outline-offset: -1px;
 }
 
+/* A text field with a button on its right: the notes-file path and the panel
+   that fills it in. The field keeps the width; the button takes only its own. */
+.field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.field-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The microphone list. Same box as the text field, so the column of inputs
+   stays one column. */
+select {
+  width: 100%;
+  padding: 6px 9px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+select:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -1px;
+}
+
 /* The shortcut recorder. It looks like the text field it replaced — same box,
    same metrics — so the settings form reads as one column of inputs rather than
    a form with a button loose in it. */
@@ -334,6 +363,21 @@ button.primary {
 
 button.primary:active {
   filter: brightness(0.92);
+}
+
+/* The quiet button: same metrics as the primary, no fill. */
+button.secondary {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+button.secondary:active {
+  background: var(--code-bg);
 }
 
 .unknown-window {

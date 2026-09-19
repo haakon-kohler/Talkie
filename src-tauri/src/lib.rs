@@ -11,6 +11,7 @@ mod journal;
 mod login_item;
 mod models;
 mod note;
+mod panel;
 mod recorder;
 mod settings;
 mod shortcut;
@@ -72,6 +73,8 @@ pub fn run() {
             commands::get_accessibility,
             commands::open_accessibility_settings,
             commands::retry_shortcut,
+            commands::pick_note_path,
+            commands::list_microphones,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

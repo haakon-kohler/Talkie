@@ -287,11 +287,31 @@ Not started. Planned scope, from the implementation plan plus decisions since:
       Chosen over in-process plugins so nothing loads at launch and a first
       plugin is a shell script; Lua for UI surfaces waits until hooks prove
       insufficient.
-- [ ] File location picker (dialog plugin)
-- [ ] Microphone picker
+- [x] File location picker — AppKit's own `NSOpenPanel`, no dialog plugin
+- [x] Microphone picker
 - [ ] Model idle-unload timer
 - [ ] Error surfacing beyond the editor's save failure
 - [ ] A real app icon (the tray still uses Tauri's default)
+
+### M3 notes
+
+- The notes-file panel is `NSOpenPanel` through `objc2-app-kit`, not
+  `tauri-plugin-dialog`. Every crate it needs was already in the tree through
+  tao and wry, so the panel cost no download and no plugin JS in the webview;
+  it is one Rust command (`pick_note_path`), like everything else the UI
+  reaches. It is an *open* panel that accepts a folder or a file, not a save
+  panel: clicking an existing `talkie.md` in a save panel asks "replace it?",
+  and Talkie never replaces anything. A folder resolves to `talkie.md` inside
+  it; a different file name is still typed into the field.
+- The panel runs as a sheet on the settings window, so it cannot be built
+  before that window exists and the command refuses if it is not there.
+- The microphone list is enumerated on every open (focus or pointer-enter),
+  because cpal has no device-change notification to cache against. The
+  setting still stores a name and nothing else — cpal 0.16 exposes no id — so
+  two identically named devices are one entry. A saved device that is absent
+  stays in the list marked "(not connected)" rather than disappearing; the
+  recorder already falls back to the default with a warning, so nothing
+  refuses the save.
 
 ## M4 — Shippable
 

@@ -5387,6 +5387,7 @@ name = "talkie"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "block2",
  "chrono",
  "cpal",
  "dirs",
@@ -5397,6 +5398,9 @@ dependencies = [
  "hound",
  "log",
  "notify",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "objc2-service-management",
  "reqwest 0.12.28",
  "rodio",
