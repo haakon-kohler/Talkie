@@ -1,6 +1,6 @@
 # Talkie — Progress
 
-Tracking against `talkie_implementation_plan.md`. One checklist per milestone; keep it current.
+One checklist per milestone; keep it current.
 
 **No backlog.** Only the milestone being built and the one after it are tracked
 here. Work that is genuinely deferred does not get a holding pen — if it matters
@@ -104,7 +104,7 @@ that becomes an onboarding step and a documented change of stance.
 - [x] Settings UI: the text field becomes a click-to-record field — live glyph preview, auto-commit on release, Esc cancels
 - [x] Commit rule: a keyed combo commits on its key's release; a modifier-only one when the last modifier is released
 - [x] Migration: existing `"Control+Alt+Space"` still parses, so stored settings carry over untouched
-- [x] Docs: `AGENTS.md` (permission stance), `talkie_implementation_plan.md` (engine table), `COPY.md` (new strings)
+- [x] Docs: `AGENTS.md` (permission stance), `COPY.md` (new strings)
 - [x] End-to-end: record ⌘-right held, speak, confirm the entry lands
 
 ### M1.5 notes
@@ -244,8 +244,6 @@ every file written in the old order is one more file with a seam in it.
   installed. Added as `onboarding.model.installed`, still lorem, awaiting text.
 
 ## M3 — Settings & robustness
-
-Not started. Planned scope, from the implementation plan plus decisions since:
 
 - [ ] **Bold and italic from the keyboard.** ⌘B / ⌘I wrap the selection (or open
       an empty pair at the cursor) and unwrap it again when the selection is

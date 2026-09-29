@@ -13,8 +13,7 @@ The markdown file is the integration surface for everything else. Obsidian just
 indexes it; an agent just watches it. There are no in-app agent features and no
 paste-into-the-active-app dictation (Handy, installed alongside, still owns that).
 
-Full plan and milestones: `talkie_implementation_plan.md`. Current state:
-`PROGRESS.md`.
+Current state: `PROGRESS.md`.
 
 ## Toolchain — read this first
 
@@ -193,5 +192,5 @@ src-tauri/src/
 
 ## Attribution
 
-`audio_toolkit/` (arriving in M1) is ported from
+`audio_toolkit/` is ported from
 [Handy](https://github.com/cjpais/Handy) (MIT). Keep its copyright notice.

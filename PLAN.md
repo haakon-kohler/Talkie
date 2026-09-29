@@ -5,8 +5,6 @@
 - ⌘B / ⌘I from the keyboard, no toolbar — regenerates the frozen CodeMirror bundle
 - one H2 per minute instead of per capture — changes the document contract
 - keyboard route to the notepad — mechanism undecided, not a double-tap - Later
-- notes file location picker — needs the dialog plugin
-- **microphone picker — host already resolves the setting, UI and device enumeration missing**
 - model idle-unload timer — `transcriber::unload` is the hook
 - capture-failure surfacing in the UI
 - real app icon, tray still on Tauri's default
