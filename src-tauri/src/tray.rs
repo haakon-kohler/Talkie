@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use talkie_shared::{RecorderState, WindowLabel};
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Manager, Runtime};
@@ -40,13 +41,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         ],
     )?;
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
-
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(icon)
+        .icon(icon(RecorderState::Idle))
+        .icon_as_template(true)
         .tooltip("Talkie")
         .menu(&menu)
         .show_menu_on_left_click(true)
@@ -76,11 +73,22 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The menu-bar glyph for a capture state: the mark alone, with a dot in its
+/// right-hand bowl while recording, with a ring while transcribing. All three
+/// are template images, black on clear, so macOS tints them for the menu bar;
+/// they share one size so the item never shifts its neighbours.
+fn icon(state: RecorderState) -> Image<'static> {
+    match state {
+        RecorderState::Idle => tauri::include_image!("icons/tray.png"),
+        RecorderState::Recording => tauri::include_image!("icons/tray-recording.png"),
+        RecorderState::Transcribing => tauri::include_image!("icons/tray-transcribing.png"),
+    }
+}
+
 /// Reflect the capture state in the menu bar.
 ///
-/// v1 has no recording overlay, so the tooltip and the menu item's wording are
-/// the only visible sign that Talkie is listening. A real set of icon variants
-/// is an M3 task, alongside the app icon.
+/// v1 has no recording overlay, so the icon, the tooltip, and the menu item's
+/// wording are the only visible signs that Talkie is listening.
 pub fn set_state<R: Runtime>(app: &AppHandle<R>, state: RecorderState) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
@@ -92,4 +100,6 @@ pub fn set_state<R: Runtime>(app: &AppHandle<R>, state: RecorderState) {
         RecorderState::Transcribing => "Talkie — transcribing",
     };
     let _ = TrayIcon::set_tooltip(&tray, Some(tooltip));
+    let _ = tray.set_icon(Some(icon(state)));
+    let _ = tray.set_icon_as_template(true);
 }

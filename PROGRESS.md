@@ -289,7 +289,7 @@ every file written in the old order is one more file with a seam in it.
 - [x] Microphone picker
 - [ ] Model idle-unload timer
 - [ ] Error surfacing beyond the editor's save failure
-- [ ] A real app icon (the tray still uses Tauri's default)
+- [x] A real app icon, and template menu-bar icons for idle · recording · transcribing
 
 ### M3 notes
 
