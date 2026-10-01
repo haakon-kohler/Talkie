@@ -23,7 +23,6 @@ Everything else in this file is in the app verbatim.
 
 | ID | Where it shows | Note |
 | --- | --- | --- |
-| `onboarding.model.installed` | Under "Speech model", once the model is on disk | In **settings** this is the only thing that section ever says, so it carries more weight than its length suggests |
 | `editor.trouble` | Bottom-right of the editor, when a save or a capture failed | `editor.trouble.conflict` is live; the rest still show the host's raw errors |
 | `onboarding.note` | Footnote under the first-run body | Empty, and nothing renders it yet |
 | `settings.note_path.hint` | Under the notes-file field | Empty |
@@ -110,11 +109,11 @@ Progress labels — *live*
 | `onboarding.model.unpacking` | Unpacking… |
 | `onboarding.model.ready` | Finished. |
 
-Installed state (`onboarding.model.installed`) — *placeholder*. Shown in place of
+Installed state (`onboarding.model.installed`) — *live*. Shown in place of
 the download button once the model is on disk — in settings too, where it is the
 only thing that section says.
 
-> 
+> We use Parakeet V3 for all local transcription.
 
 ### Step 4 — finish
 

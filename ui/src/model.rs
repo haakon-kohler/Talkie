@@ -98,8 +98,8 @@ where
                     }
                 }
             >
-                // COPY: onboarding.model.installed — placeholder
-                <p class="muted">"Lorem ipsum: Parakeet V3, installed and offline."</p>
+                // COPY: onboarding.model.installed
+                <p class="muted">"We use Parakeet V3 for all local transcription."</p>
             </Show>
         </div>
     }
