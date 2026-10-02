@@ -314,6 +314,27 @@ mod tests {
         assert!(strays.is_empty(), "left behind: {strays:?}");
     }
 
+    /// `set_settings` validates the path on every save, and the probe is the
+    /// same scratch file `write` uses. A capture or an autosave between its
+    /// write and its rename has its text truncated (the rename then installs
+    /// an empty note) or deleted (the rename fails and the text is gone).
+    #[test]
+    #[ignore = "found testing #5: the validation probe shares write's scratch file"]
+    fn validate_leaves_a_write_in_flight_alone() {
+        let path = temp_note("validate-in-flight");
+        write(&path, "## 2026-10-02 10:00\nOn disk\n").unwrap();
+        let scratch = temp_sibling(&path);
+        fs::write(&scratch, "## 2026-10-02 10:01\nIn flight\n").unwrap();
+
+        validate(path.to_str().unwrap()).expect("validate");
+
+        assert_eq!(
+            fs::read_to_string(&scratch).ok().as_deref(),
+            Some("## 2026-10-02 10:01\nIn flight\n"),
+            "the write in flight was clobbered"
+        );
+    }
+
     #[test]
     fn write_leaves_no_temporary_file_behind() {
         let path = temp_note("no-litter");

@@ -23,7 +23,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -55,14 +55,16 @@ pub struct NoteWatcher {
     /// The text itself, not a hash of it: it is the *base* a save merges
     /// against when the file moved underneath the editor, and a hash cannot be
     /// diffed.
-    seen: Mutex<Option<String>>,
+    ///
+    /// Shared with the watch thread, which records what it finds on disk.
+    seen: Arc<Mutex<Option<String>>>,
 }
 
 impl NoteWatcher {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             watcher: Mutex::new(None),
-            seen: Mutex::new(None),
+            seen: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -76,16 +78,69 @@ impl NoteWatcher {
         self.seen.lock().expect("watcher mutex poisoned").clone()
     }
 
-    /// Whether `text` is news, and if so remember it. One call, because every
-    /// caller does both and doing them separately invites a race.
-    fn take_if_new(&self, text: &str) -> bool {
-        let mut seen = self.seen.lock().expect("watcher mutex poisoned");
-        if seen.as_deref() == Some(text) {
-            return false;
-        }
-        *seen = Some(text.to_string());
-        true
+    /// Start watching `path`, replacing any previous watch.
+    ///
+    /// `on_change` runs on the watch thread each time the file settles on
+    /// content Talkie has not seen. Kept apart from `arm` so the watch can be
+    /// driven without an app around it.
+    pub(crate) fn watch(&self, path: &Path, on_change: impl Fn() + Send + 'static) -> Result<()> {
+        let directory = path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        // The folder need not exist yet — the first capture creates it — but
+        // there is nothing to watch until it does.
+        std::fs::create_dir_all(&directory)
+            .with_context(|| format!("could not create the notes folder {directory:?}"))?;
+
+        let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
+        let mut watcher = notify::recommended_watcher(move |event| {
+            let _ = tx.send(event);
+        })
+        .context("could not create a file watcher")?;
+        watcher
+            .watch(&directory, RecursiveMode::NonRecursive)
+            .with_context(|| format!("could not watch {directory:?}"))?;
+
+        let seen = Arc::clone(&self.seen);
+        let watched = path.to_path_buf();
+        std::thread::Builder::new()
+            .name("talkie-note-watcher".into())
+            .spawn(move || {
+                // Ends when the watcher is dropped and the sender goes with it,
+                // which is how re-arming retires the previous thread.
+                while let Ok(first) = rx.recv() {
+                    if !concerns(&first, &watched) {
+                        continue;
+                    }
+                    // Drain the rest of the flurry before reading: keep
+                    // swallowing events until SETTLE passes with nothing new,
+                    // or the bound is hit.
+                    let mut rounds = 0;
+                    while rounds < MAX_SETTLE_ROUNDS && rx.recv_timeout(SETTLE).is_ok() {
+                        rounds += 1;
+                    }
+                    if noticed(&seen, &watched) {
+                        on_change();
+                    }
+                }
+            })
+            .context("could not start the note watcher thread")?;
+
+        *self.watcher.lock().expect("watcher mutex poisoned") = Some(watcher);
+        Ok(())
     }
+}
+
+/// Whether `text` is news, and if so remember it. One call, because every
+/// caller does both and doing them separately invites a race.
+fn take_if_new(seen: &Mutex<Option<String>>, text: &str) -> bool {
+    let mut seen = seen.lock().expect("watcher mutex poisoned");
+    if seen.as_deref() == Some(text) {
+        return false;
+    }
+    *seen = Some(text.to_string());
+    true
 }
 
 /// Register the watcher state. Called once, from `lib.rs`, before `arm`.
@@ -108,51 +163,12 @@ pub fn arm(app: &AppHandle) -> Result<()> {
         note::resolve(&guard.note_path)
     };
 
-    let directory = path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    // The folder need not exist yet — the first capture creates it — but there
-    // is nothing to watch until it does.
-    std::fs::create_dir_all(&directory)
-        .with_context(|| format!("could not create the notes folder {directory:?}"))?;
-
-    let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
-    let mut watcher = notify::recommended_watcher(move |event| {
-        let _ = tx.send(event);
-    })
-    .context("could not create a file watcher")?;
-    watcher
-        .watch(&directory, RecursiveMode::NonRecursive)
-        .with_context(|| format!("could not watch {directory:?}"))?;
-
     let handle = app.clone();
-    let watched = path.clone();
-    std::thread::Builder::new()
-        .name("talkie-note-watcher".into())
-        .spawn(move || {
-            // Ends when the watcher is dropped and the sender goes with it,
-            // which is how re-arming retires the previous thread.
-            while let Ok(first) = rx.recv() {
-                if !concerns(&first, &watched) {
-                    continue;
-                }
-                // Drain the rest of the flurry before reading: keep swallowing
-                // events until SETTLE passes with nothing new, or the bound
-                // is hit.
-                let mut rounds = 0;
-                while rounds < MAX_SETTLE_ROUNDS && rx.recv_timeout(SETTLE).is_ok() {
-                    rounds += 1;
-                }
-                report(&handle, &watched);
-            }
-        })
-        .context("could not start the note watcher thread")?;
-
-    *app.state::<NoteWatcher>()
-        .watcher
-        .lock()
-        .expect("watcher mutex poisoned") = Some(watcher);
+    app.state::<NoteWatcher>().watch(&path, move || {
+        if let Err(e) = handle.emit(events::NOTE_CHANGED_EXTERNALLY, ()) {
+            log::error!("talkie: could not announce a note change: {e}");
+        }
+    })?;
 
     log::info!("talkie: watching {}", path.display());
     Ok(())
@@ -170,22 +186,15 @@ fn concerns(event: &notify::Result<Event>, path: &Path) -> bool {
     }
 }
 
-/// Read the file and tell the editor, if what is there is not already ours.
-fn report(app: &AppHandle, path: &Path) {
-    let text = match note::read(path) {
-        Ok(text) => text,
+/// Read the file and decide whether it is news — if what is there is not
+/// already ours.
+fn noticed(seen: &Mutex<Option<String>>, path: &Path) -> bool {
+    match note::read(path) {
+        Ok(text) => take_if_new(seen, &text),
         Err(e) => {
             log::warn!("talkie: could not read {}: {e:#}", path.display());
-            return;
+            false
         }
-    };
-
-    if !app.state::<NoteWatcher>().take_if_new(&text) {
-        return;
-    }
-
-    if let Err(e) = app.emit(events::NOTE_CHANGED_EXTERNALLY, ()) {
-        log::error!("talkie: could not announce a note change: {e}");
     }
 }
 
@@ -196,15 +205,98 @@ mod tests {
     #[test]
     fn the_same_content_is_only_news_once() {
         let watcher = NoteWatcher::new();
-        assert!(watcher.take_if_new("hello"));
-        assert!(!watcher.take_if_new("hello"));
-        assert!(watcher.take_if_new("hello there"));
+        assert!(take_if_new(&watcher.seen, "hello"));
+        assert!(!take_if_new(&watcher.seen, "hello"));
+        assert!(take_if_new(&watcher.seen, "hello there"));
     }
 
     #[test]
     fn remembering_our_own_write_silences_it() {
         let watcher = NoteWatcher::new();
         watcher.remember("what the editor just saved");
-        assert!(!watcher.take_if_new("what the editor just saved"));
+        assert!(!take_if_new(&watcher.seen, "what the editor just saved"));
+    }
+
+    /// How long to wait for a report that should come. Only ever spent in
+    /// full when a test is about to fail.
+    const PATIENCE: Duration = Duration::from_secs(5);
+
+    /// Two note paths in two folders. Canonical, because FSEvents reports the
+    /// real path and the macOS temporary folder sits behind a symlink.
+    fn two_notes(name: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("talkie-watcher-test-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::create_dir_all(dir.join("b")).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        (dir.join("a/talkie.md"), dir.join("b/talkie.md"))
+    }
+
+    fn watching(watcher: &NoteWatcher, path: &Path) -> mpsc::Receiver<()> {
+        let (tx, rx) = mpsc::channel();
+        watcher
+            .watch(path, move || {
+                let _ = tx.send(());
+            })
+            .expect("watch");
+        rx
+    }
+
+    #[test]
+    fn a_change_to_the_file_is_reported_and_remembered() {
+        let (a, _) = two_notes("reported");
+        let watcher = NoteWatcher::new();
+        let reports = watching(&watcher, &a);
+
+        note::write(&a, "## 2026-10-02 10:00\nFrom Obsidian\n").unwrap();
+
+        reports.recv_timeout(PATIENCE).expect("no report");
+        assert_eq!(
+            watcher.last_seen().as_deref(),
+            Some("## 2026-10-02 10:00\nFrom Obsidian\n")
+        );
+    }
+
+    /// Re-arming is how a path change reaches the watcher: the new file is
+    /// reported, the old one no longer is.
+    #[test]
+    fn rearming_moves_the_watch_to_the_new_file() {
+        let (a, b) = two_notes("rearmed");
+        let watcher = NoteWatcher::new();
+        let old = watching(&watcher, &a);
+        let new = watching(&watcher, &b);
+
+        note::write(&a, "A changed\n").unwrap();
+        note::write(&b, "B changed\n").unwrap();
+
+        new.recv_timeout(PATIENCE).expect("B was not reported");
+        assert!(
+            old.recv_timeout(SETTLE * 3).is_err(),
+            "A was reported after the watch moved"
+        );
+        assert_eq!(watcher.last_seen().as_deref(), Some("B changed\n"));
+    }
+
+    /// The thread behind the old watch can be mid-flurry when the path
+    /// changes. Dropping the watcher ends the flurry early, and the thread
+    /// then reads the *old* file into the merge base and reports it — after
+    /// the switch, and after anything the switch did to the base.
+    #[test]
+    #[ignore = "#5: a re-arm mid-flurry still reports the old file after the switch"]
+    fn a_rearm_mid_flurry_does_not_report_the_old_file() {
+        let (a, b) = two_notes("mid-flurry");
+        let watcher = NoteWatcher::new();
+        let old = watching(&watcher, &a);
+
+        note::write(&a, "A changed\n").unwrap();
+        // Inside SETTLE: the old thread has the event and is draining.
+        std::thread::sleep(SETTLE / 3);
+        let _new = watching(&watcher, &b);
+
+        assert!(
+            old.recv_timeout(SETTLE * 3).is_err(),
+            "A was reported after the watch moved"
+        );
+        assert_ne!(watcher.last_seen().as_deref(), Some("A changed\n"));
     }
 }
