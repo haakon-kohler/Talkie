@@ -343,6 +343,43 @@ mod tests {
         );
     }
 
+    // Issue #5: a save merged against a base that belongs to another file. The
+    // three below pin the premises any fix has to work with.
+
+    /// The editor still holds file A when the path moves to B. Merging its
+    /// text against A's base refuses — B is not A with a capture on top —
+    /// and that refusal is the only thing standing between the stale text
+    /// and B.
+    #[test]
+    fn a_save_against_another_files_base_is_a_conflict() {
+        let a = "## 2026-10-01 09:00\nOld file\n";
+        let b = "## 2026-10-02 10:00\nNew file\n";
+        let edited = format!("{a}typed\n");
+        assert_eq!(reconcile(&edited, b, Some(a)), Save::Conflict);
+        // A B that does not exist yet reads as empty — still a conflict.
+        assert_eq!(reconcile(&edited, "", Some(a)), Save::Conflict);
+    }
+
+    /// Once the base has caught up with B, the stale text wins outright: a
+    /// base equal to what is on disk means "nothing moved", whoever moved
+    /// the base.
+    #[test]
+    fn a_base_that_caught_up_with_disk_writes_blindly() {
+        let b = "## 2026-10-02 10:00\nNew file\n";
+        let stale = "## 2026-10-01 09:00\nOld file\ntyped\n";
+        assert_eq!(reconcile(stale, b, Some(b)), Save::Write(stale.to_string()));
+    }
+
+    /// So forgetting the base on a path change is not a fix on its own: with
+    /// no base there is nothing to merge against, and the stale text is
+    /// written straight over B.
+    #[test]
+    fn a_forgotten_base_writes_blindly_over_another_file() {
+        let b = "## 2026-10-02 10:00\nNew file\n";
+        let stale = "## 2026-10-01 09:00\nOld file\ntyped\n";
+        assert_eq!(reconcile(stale, b, None), Save::Write(stale.to_string()));
+    }
+
     #[test]
     fn entry_shape_matches_the_contract() {
         assert_eq!(

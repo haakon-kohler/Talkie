@@ -1,6 +1,7 @@
 //! Every command the webview can call. Names come from `talkie_shared::commands`
 //! so the two sides can never drift apart silently.
 
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use talkie_shared::{
@@ -160,8 +161,13 @@ pub fn read_note(app: AppHandle, state: State<'_, SettingsState>) -> Result<Stri
         let guard = state.0.lock().expect("settings mutex poisoned");
         note::resolve(&guard.note_path)
     };
-    let text = note::read(&path).map_err(|e| format!("{e:#}"))?;
-    app.state::<NoteWatcher>().remember(&text);
+    load_note(&path, &app.state::<NoteWatcher>())
+}
+
+/// `read_note` without the app around it.
+fn load_note(path: &Path, watcher: &NoteWatcher) -> Result<String, String> {
+    let text = note::read(path).map_err(|e| format!("{e:#}"))?;
+    watcher.remember(&text);
     Ok(text)
 }
 
@@ -192,12 +198,15 @@ pub fn write_note(
         let guard = state.0.lock().expect("settings mutex poisoned");
         note::resolve(&guard.note_path)
     };
+    save_note(&path, &text, &app.state::<NoteWatcher>())
+}
 
-    let watcher = app.state::<NoteWatcher>();
-    let on_disk = note::read(&path).map_err(|e| format!("{e:#}"))?;
+/// `write_note` without the app around it.
+fn save_note(path: &Path, text: &str, watcher: &NoteWatcher) -> Result<String, String> {
+    let on_disk = note::read(path).map_err(|e| format!("{e:#}"))?;
     let base = watcher.last_seen();
 
-    let to_write = match document::reconcile(&text, &on_disk, base.as_deref()) {
+    let to_write = match document::reconcile(text, &on_disk, base.as_deref()) {
         document::Save::Write(text) => text,
         // COPY: editor.trouble.conflict
         document::Save::Conflict => {
@@ -217,7 +226,7 @@ pub fn write_note(
     // Remembered before the write so the change notification it causes is
     // recognised as Talkie's own and never bounces back into the editor.
     watcher.remember(&to_write);
-    note::write(&path, &to_write).map_err(|e| format!("{e:#}"))?;
+    note::write(path, &to_write).map_err(|e| format!("{e:#}"))?;
 
     Ok(to_write)
 }
@@ -313,4 +322,265 @@ pub fn manage_settings(app: &AppHandle, settings: Settings) {
         "settings::load must resolve a note path before it is managed"
     );
     app.manage(SettingsState(Mutex::new(settings)));
+}
+
+#[cfg(test)]
+mod tests {
+    //! Issue #5 — the notes path changes under an open editor — driven the way
+    //! the app drives it: `load_note` is the editor's `read_note`, `save_note`
+    //! its autosave, `NoteWatcher::watch` what `set_settings` does when the
+    //! path changes, and `note::prepend` a capture.
+    //!
+    //! The editor that never hears about the change is simulated by saving
+    //! the text it last loaded. The ignored tests fail today and describe the
+    //! behaviour the fix has to deliver: `cargo test -p talkie -- --ignored`.
+
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::*;
+
+    const A: &str = "## 2026-10-01 09:00\nOld file\n";
+    const B: &str = "## 2026-10-02 10:00\nNew file\n";
+
+    /// How long to wait for the watcher to report. Only ever spent in full
+    /// when a test is about to fail.
+    const PATIENCE: Duration = Duration::from_secs(5);
+
+    /// Two note paths in two folders, the way switching vaults looks. Neither
+    /// file exists yet.
+    fn two_notes(name: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("talkie-commands-test-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("a")).unwrap();
+        fs::create_dir_all(dir.join("b")).unwrap();
+        // Canonical, because FSEvents reports the real path and the macOS
+        // temporary folder sits behind a symlink.
+        let dir = dir.canonicalize().unwrap();
+        (dir.join("a/talkie.md"), dir.join("b/talkie.md"))
+    }
+
+    /// Point the watcher at `path`, as `arm` does at startup and on a path
+    /// change. The reports the editor would hear arrive on the channel.
+    fn arm(watcher: &NoteWatcher, path: &Path) -> mpsc::Receiver<()> {
+        let (tx, rx) = mpsc::channel();
+        watcher
+            .watch(path, move || {
+                let _ = tx.send(());
+            })
+            .expect("watch");
+        rx
+    }
+
+    fn contents(path: &Path) -> String {
+        note::read(path).expect("read")
+    }
+
+    /// The first save after the switch carries A's text. It has to be
+    /// refused; a fix that forgets the merge base on a path change turns this
+    /// into a write over B.
+    #[test]
+    fn a_stale_save_after_a_path_change_is_refused() {
+        let (a, b) = two_notes("stale-refused");
+        fs::write(&a, A).unwrap();
+        fs::write(&b, B).unwrap();
+        let watcher = NoteWatcher::new();
+        let _reports = arm(&watcher, &a);
+        let shown = load_note(&a, &watcher).expect("load");
+
+        let _reports = arm(&watcher, &b);
+        let saved = save_note(&b, &format!("{shown}typed\n"), &watcher);
+
+        assert!(saved.is_err(), "A's text was saved into B: {saved:?}");
+        assert_eq!(contents(&b), B);
+        assert_eq!(contents(&a), A);
+    }
+
+    /// Switching to a path that does not exist yet: the stale save must not
+    /// create B with A's text in it.
+    #[test]
+    fn a_stale_save_to_a_new_path_creates_nothing() {
+        let (a, b) = two_notes("stale-new-path");
+        fs::write(&a, A).unwrap();
+        let watcher = NoteWatcher::new();
+        let _reports = arm(&watcher, &a);
+        let shown = load_note(&a, &watcher).expect("load");
+
+        let _reports = arm(&watcher, &b);
+        let saved = save_note(&b, &format!("{shown}typed\n"), &watcher);
+
+        assert!(saved.is_err(), "A's text was saved into B: {saved:?}");
+        assert!(!b.exists(), "B was created with {:?}", contents(&b));
+    }
+
+    /// The issue's step 4: a capture lands in B, the watcher reports it, the
+    /// dirty editor ignores the report, and the next keystroke saves A's text
+    /// over B — capture included.
+    #[test]
+    #[ignore = "#5: the watcher moves the merge base to B, so the stale save overwrites B"]
+    fn a_stale_save_never_overwrites_the_new_file() {
+        let (a, b) = two_notes("stale-overwrite");
+        fs::write(&a, A).unwrap();
+        fs::write(&b, B).unwrap();
+        let watcher = NoteWatcher::new();
+        let _reports = arm(&watcher, &a);
+        let stale = format!("{}typed\n", load_note(&a, &watcher).expect("load"));
+
+        let reports = arm(&watcher, &b);
+        assert!(save_note(&b, &stale, &watcher).is_err());
+
+        note::prepend(&b, "Spoken into B").expect("capture");
+        let after_capture = contents(&b);
+        reports
+            .recv_timeout(PATIENCE)
+            .expect("the watcher never reported the capture");
+        let _ = save_note(&b, &stale, &watcher);
+
+        assert_eq!(contents(&b), after_capture, "B was overwritten");
+        assert_eq!(contents(&a), A);
+    }
+
+    /// The way out the UI fix will take: once the editor has read B, saves go
+    /// to B as usual and A is left alone.
+    #[test]
+    fn the_editor_saves_to_the_new_file_once_it_has_read_it() {
+        let (a, b) = two_notes("reloaded");
+        fs::write(&a, A).unwrap();
+        fs::write(&b, B).unwrap();
+        let watcher = NoteWatcher::new();
+        let _reports = arm(&watcher, &a);
+        load_note(&a, &watcher).expect("load");
+
+        let _reports = arm(&watcher, &b);
+        let shown = load_note(&b, &watcher).expect("load");
+        let edited = format!("{shown}typed\n");
+
+        assert_eq!(save_note(&b, &edited, &watcher), Ok(edited.clone()));
+        assert_eq!(contents(&b), edited);
+        assert_eq!(contents(&a), A);
+    }
+
+    /// The same for a path that does not exist yet: the first save creates B
+    /// with only what was typed.
+    #[test]
+    fn the_editor_creates_the_new_file_once_it_has_read_it() {
+        let (a, b) = two_notes("reloaded-new-path");
+        fs::write(&a, A).unwrap();
+        let watcher = NoteWatcher::new();
+        let _reports = arm(&watcher, &a);
+        load_note(&a, &watcher).expect("load");
+
+        let _reports = arm(&watcher, &b);
+        assert_eq!(load_note(&b, &watcher), Ok(String::new()));
+
+        assert_eq!(save_note(&b, "typed", &watcher), Ok("typed\n".to_string()));
+        assert_eq!(contents(&b), "typed\n");
+        assert_eq!(contents(&a), A);
+    }
+
+    /// A → B → A, reading each time: the editor ends up saving A, and B is
+    /// never touched.
+    #[test]
+    fn switching_back_saves_to_the_old_file_and_leaves_the_new_one() {
+        let (a, b) = two_notes("switch-back");
+        fs::write(&a, A).unwrap();
+        fs::write(&b, B).unwrap();
+        let watcher = NoteWatcher::new();
+        let _reports = arm(&watcher, &a);
+        load_note(&a, &watcher).expect("load");
+        let _reports = arm(&watcher, &b);
+        load_note(&b, &watcher).expect("load");
+
+        let _reports = arm(&watcher, &a);
+        let edited = format!("{}typed\n", load_note(&a, &watcher).expect("load"));
+
+        assert_eq!(save_note(&a, &edited, &watcher), Ok(edited.clone()));
+        assert_eq!(contents(&a), edited);
+        assert_eq!(contents(&b), B);
+    }
+
+    /// The issue's "switch back" case without the UI reload, and the worst
+    /// version of step 4: the editor follows a capture into B, the path goes
+    /// back to A, and once a capture into A is reported the editor's copy of
+    /// B replaces A's entire history.
+    #[test]
+    #[ignore = "#5: the watcher moves the merge base to A, so B's text overwrites A"]
+    fn switching_back_without_a_reload_never_overwrites_the_old_file() {
+        let (a, b) = two_notes("switch-back-stale");
+        fs::write(&a, A).unwrap();
+        fs::write(&b, B).unwrap();
+        let watcher = NoteWatcher::new();
+        let _reports = arm(&watcher, &a);
+        load_note(&a, &watcher).expect("load");
+
+        // On B, a capture is reported and the clean editor reloads.
+        let reports = arm(&watcher, &b);
+        note::prepend(&b, "Spoken into B").expect("capture");
+        reports.recv_timeout(PATIENCE).expect("no report from B");
+        let stale = format!("{}typed\n", load_note(&b, &watcher).expect("load"));
+
+        // Back on A, the editor still shows B.
+        let reports = arm(&watcher, &a);
+        assert!(save_note(&a, &stale, &watcher).is_err());
+        note::prepend(&a, "Spoken into A").expect("capture");
+        let after_capture = contents(&a);
+        reports.recv_timeout(PATIENCE).expect("no report from A");
+        let _ = save_note(&a, &stale, &watcher);
+
+        assert_eq!(contents(&a), after_capture, "A was overwritten");
+    }
+
+    // The same mechanism as step 4, with no path change at all. The merge in
+    // `save_note` carries a capture over only while the merge base still
+    // predates it, and the watcher advances the base as soon as the file
+    // settles — 150 ms after the capture, well inside the editor's 600 ms
+    // debounce.
+
+    /// The merge works when the save gets there before the watcher does.
+    #[test]
+    fn a_capture_mid_edit_is_carried_over_when_the_save_beats_the_watcher() {
+        let (a, _) = two_notes("capture-before-report");
+        fs::write(&a, A).unwrap();
+        let watcher = NoteWatcher::new();
+        let edited = load_note(&a, &watcher)
+            .expect("load")
+            .replace("Old", "Edited");
+
+        note::prepend(&a, "Spoken mid-edit").expect("capture");
+        let saved = save_note(&a, &edited, &watcher).expect("save");
+
+        assert!(saved.contains("Spoken mid-edit"), "lost: {saved:?}");
+        assert!(saved.contains("Edited file"), "lost: {saved:?}");
+        assert_eq!(contents(&a), saved);
+    }
+
+    /// And loses the capture when the watcher gets there first: the editor
+    /// is dirty, so it ignores the report, and the save then finds base and
+    /// disk equal and writes over the capture.
+    #[test]
+    #[ignore = "#5 without a path change: the watcher moves the merge base under unsaved edits"]
+    fn a_capture_mid_edit_is_carried_over_after_the_watcher_reports_it() {
+        let (a, _) = two_notes("capture-after-report");
+        fs::write(&a, A).unwrap();
+        let watcher = NoteWatcher::new();
+        let reports = arm(&watcher, &a);
+        let edited = load_note(&a, &watcher)
+            .expect("load")
+            .replace("Old", "Edited");
+
+        note::prepend(&a, "Spoken mid-edit").expect("capture");
+        reports
+            .recv_timeout(PATIENCE)
+            .expect("the watcher never reported the capture");
+        let saved = save_note(&a, &edited, &watcher);
+
+        let now = contents(&a);
+        assert!(
+            now.contains("Spoken mid-edit"),
+            "the capture was lost: {now:?}"
+        );
+        assert!(saved.is_err() || now.contains("Edited file"), "{now:?}");
+    }
 }
