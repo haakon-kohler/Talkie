@@ -11,6 +11,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::Local;
@@ -84,14 +85,22 @@ pub fn write(note_path: &Path, text: &str) -> Result<()> {
     Ok(())
 }
 
-/// A scratch path next to the real one. The pid keeps two Talkies (a dev build
-/// and a bundle, say) from colliding on the same temporary file.
+/// A scratch path next to the real one, never handed out twice. The pid keeps
+/// two Talkies (a dev build and a bundle, say) from colliding on the same
+/// temporary file; the counter does the same within one Talkie, where a
+/// capture, an autosave and the settings form's write probe can all be in
+/// flight at once, and one truncating another's scratch file costs the note.
 fn temp_sibling(note_path: &Path) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let name = note_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "talkie.md".to_string());
-    let temp_name = format!(".{name}.talkie-{}.tmp", std::process::id());
+    let temp_name = format!(
+        ".{name}.talkie-{}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
     match note_path.parent() {
         Some(parent) => parent.join(temp_name),
         None => PathBuf::from(temp_name),
@@ -314,12 +323,12 @@ mod tests {
         assert!(strays.is_empty(), "left behind: {strays:?}");
     }
 
-    /// `set_settings` validates the path on every save, and the probe is the
-    /// same scratch file `write` uses. A capture or an autosave between its
-    /// write and its rename has its text truncated (the rename then installs
-    /// an empty note) or deleted (the rename fails and the text is gone).
+    /// `set_settings` validates the path on every save, and the probe used to
+    /// be the same scratch file `write` uses. A capture or an autosave between
+    /// its write and its rename had its text truncated (the rename then
+    /// installed an empty note) or deleted (the rename failed and the text was
+    /// gone).
     #[test]
-    #[ignore = "found testing #5: the validation probe shares write's scratch file"]
     fn validate_leaves_a_write_in_flight_alone() {
         let path = temp_note("validate-in-flight");
         write(&path, "## 2026-10-02 10:00\nOn disk\n").unwrap();

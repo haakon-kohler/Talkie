@@ -12,6 +12,10 @@
 //!   arrives as text added at the top of the file, so it is applied as an
 //!   insert — which keeps the cursor where it was, keeps undo history, and
 //!   scrolls the new entry into view. Anything else replaces the document.
+//! - **Every save names its file.** The notes path can move in Settings while
+//!   edits are waiting; they go to the file they were typed into, and only
+//!   then does the editor open the new one — as a fresh editor, so undo cannot
+//!   carry one file's text into the other.
 //!
 //! Where "the top" is, and what counts as a capture rather than an edit, come
 //! from `talkie_shared::document` — the same code the host saves through, so the
@@ -25,7 +29,7 @@ use leptos::html::Div;
 use leptos::leptos_dom::helpers::{set_timeout_with_handle, TimeoutHandle};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use talkie_shared::{commands, document, events, RecorderState, WriteNoteArgs};
+use talkie_shared::{commands, document, events, Note, RecorderState, Settings, WriteNoteArgs};
 use wasm_bindgen::prelude::*;
 
 use crate::cm::Editor;
@@ -55,27 +59,27 @@ pub fn EditorPage() -> impl IntoView {
 
             let autosave = autosave.clone();
             spawn_local(async move {
-                let text = match ipc::fetch::<String>(commands::READ_NOTE).await {
-                    Ok(text) => text,
+                let note = match ipc::fetch::<Note>(commands::READ_NOTE).await {
+                    Ok(note) => note,
                     Err(e) => {
                         autosave.trouble.set(e);
                         return;
                     }
                 };
 
-                let on_change = {
-                    let autosave = autosave.clone();
-                    move || autosave.touch()
-                };
+                *autosave.host.borrow_mut() = Some(element.into());
+                autosave.ledger.borrow_mut().path = note.path;
                 // No scrolling to do: CodeMirror opens at the top, and the top
                 // is where the newest capture is.
-                let mounted = Editor::mount(&element, &text, prefers_dark(), on_change);
-                mounted.focus();
-                *autosave.editor.borrow_mut() = Some(mounted);
+                autosave.open(&note.text);
+                if let Some(editor) = autosave.editor.borrow().as_ref() {
+                    editor.focus();
+                }
 
                 follow_system_theme(autosave.editor.clone());
                 flush_on_blur(autosave.clone());
-                follow_external_changes(autosave);
+                follow_external_changes(autosave.clone());
+                follow_note_path(autosave);
             });
         }
     });
@@ -108,6 +112,8 @@ pub fn EditorPage() -> impl IntoView {
 /// into one write, and the IO behind whatever the [`Ledger`] decides.
 #[derive(Clone)]
 struct Autosave {
+    /// Where the editor is mounted, kept for opening a fresh one in its place.
+    host: Rc<RefCell<Option<web_sys::Element>>>,
     editor: Rc<RefCell<Option<Editor>>>,
     ledger: Rc<RefCell<Ledger>>,
     /// Set while Talkie itself is changing the document. CodeMirror reports a
@@ -124,6 +130,7 @@ struct Autosave {
 impl Autosave {
     fn new() -> Self {
         Self {
+            host: Rc::new(RefCell::new(None)),
             editor: Rc::new(RefCell::new(None)),
             ledger: Rc::new(RefCell::new(Ledger::default())),
             applying: Rc::new(Cell::new(false)),
@@ -159,19 +166,43 @@ impl Autosave {
         self.editor.borrow().as_ref().map(Editor::doc)
     }
 
+    /// Mount a fresh editor on `text`, in place of any before it. A replace
+    /// would keep the undo history, and one ⌘Z after a switch would put the
+    /// old file's text into the new one.
+    fn open(&self, text: &str) {
+        let Some(host) = self.host.borrow().clone() else {
+            return;
+        };
+        // Torn down first, so the old view has left the page before the new
+        // one goes in.
+        let old = self.editor.borrow_mut().take();
+        drop(old);
+        let on_change = {
+            let me = self.clone();
+            move || me.touch()
+        };
+        let mounted = Editor::mount(&host, text, prefers_dark(), on_change);
+        *self.editor.borrow_mut() = Some(mounted);
+    }
+
     /// Make `change` to the mounted editor as Talkie's own, not the user's.
     /// CodeMirror calls the change listener synchronously inside the dispatch,
     /// so the flag is back off before this returns.
     fn apply(&self, change: Change) {
+        let (insert_at, text) = match change {
+            Change::Open(text) => return self.open(&text),
+            Change::Insert { at, text } => (Some(at), text),
+            Change::Replace(text) => (None, text),
+        };
         let editor = self.editor.borrow();
         let Some(editor) = editor.as_ref() else {
             return;
         };
         debug_assert!(!self.applying.get(), "nested programmatic change");
         self.applying.set(true);
-        match change {
-            Change::Insert { at, text } => editor.insert_and_reveal(at, &text),
-            Change::Replace(text) => editor.set_doc(&text),
+        match insert_at {
+            Some(at) => editor.insert_and_reveal(at, &text),
+            None => editor.set_doc(&text),
         }
         self.applying.set(false);
     }
@@ -181,19 +212,46 @@ impl Autosave {
         if let Some(pending) = self.timer.take() {
             pending.clear();
         }
-        let Some(text) = self.ledger.borrow_mut().begin_save(|| self.doc()) else {
+        let Some(args) = self.ledger.borrow_mut().begin_save(|| self.doc()) else {
             return;
         };
 
         let me = self.clone();
         spawn_local(async move {
-            let args = WriteNoteArgs { text };
             let saved = ipc::call::<WriteNoteArgs, String>(commands::WRITE_NOTE, &args).await;
             let change = me
                 .ledger
                 .borrow_mut()
                 .finish_save(&args.text, saved, || me.doc());
             me.trouble.set(me.ledger.borrow().trouble.clone());
+            if let Some(change) = change {
+                me.apply(change);
+            }
+            if me.ledger.borrow_mut().catch_up() {
+                me.follow();
+            }
+        });
+    }
+
+    /// Bring the document in line with the notes file — whichever file
+    /// Settings names now. Put off while anything is unsaved or still being
+    /// saved: the read makes what it returns the base of the next save, so it
+    /// must not happen under text that has not reached its own file yet.
+    fn follow(&self) {
+        if !self.ledger.borrow_mut().may_read() {
+            return;
+        }
+        let me = self.clone();
+        spawn_local(async move {
+            let Ok(note) = ipc::fetch::<Note>(commands::READ_NOTE).await else {
+                return;
+            };
+            let Some(doc) = me.doc() else {
+                return;
+            };
+            // Asked after the read, not before: the read was a round trip, and
+            // a keystroke during it would make this reload a clobber.
+            let change = me.ledger.borrow_mut().loaded(&doc, note);
             if let Some(change) = change {
                 me.apply(change);
             }
@@ -212,6 +270,15 @@ struct Ledger {
     dirty: bool,
     /// Empty unless a save failed.
     trouble: String,
+    /// The file the document is the text of, as `read_note` named it. Every
+    /// save names it, so edits land in the file they were typed into even
+    /// after Settings has moved on to another.
+    path: String,
+    /// Saves sent and not answered yet.
+    in_flight: usize,
+    /// A read was put off because something was unsaved or in flight. It
+    /// happens once the last save lands with nothing left unsaved.
+    behind: bool,
 }
 
 /// What to do to the document to bring it in line with the file.
@@ -222,6 +289,8 @@ enum Change {
     Insert { at: usize, text: String },
     /// Anything else replaces the document.
     Replace(String),
+    /// Another file altogether: a fresh editor on its text.
+    Open(String),
 }
 
 impl Ledger {
@@ -232,7 +301,7 @@ impl Ledger {
 
     /// The text to write, if there is anything to write. `doc` is asked only
     /// when there is, so a blur with nothing unsaved stringifies nothing.
-    fn begin_save(&mut self, doc: impl FnOnce() -> Option<String>) -> Option<String> {
+    fn begin_save(&mut self, doc: impl FnOnce() -> Option<String>) -> Option<WriteNoteArgs> {
         if !self.dirty {
             return None;
         }
@@ -243,7 +312,11 @@ impl Ledger {
         // Clean before the write, not after: an edit made while the write is
         // in flight has to leave the document dirty again, or it would be lost.
         self.dirty = false;
-        Some(text)
+        self.in_flight += 1;
+        Some(WriteNoteArgs {
+            path: self.path.clone(),
+            text,
+        })
     }
 
     /// A save came back. `sent` is what [`Ledger::begin_save`] handed out, and
@@ -260,6 +333,8 @@ impl Ledger {
         saved: Result<String, String>,
         doc: impl FnOnce() -> Option<String>,
     ) -> Option<Change> {
+        debug_assert!(self.in_flight > 0, "a save came back that was never sent");
+        self.in_flight = self.in_flight.saturating_sub(1);
         let saved = match saved {
             Ok(saved) => saved,
             Err(e) => {
@@ -283,6 +358,41 @@ impl Ledger {
             None if !self.dirty => Some(Change::Replace(saved)),
             None => None,
         }
+    }
+
+    /// Whether the file may be read into the document now. If not, the read
+    /// is remembered and [`Ledger::catch_up`] says when it can happen.
+    fn may_read(&mut self) -> bool {
+        if self.dirty || self.in_flight > 0 {
+            self.behind = true;
+            return false;
+        }
+        true
+    }
+
+    /// Whether a read put off by [`Ledger::may_read`] can happen now.
+    fn catch_up(&mut self) -> bool {
+        if !self.behind || self.dirty || self.in_flight > 0 {
+            return false;
+        }
+        self.behind = false;
+        true
+    }
+
+    /// `read_note` came back with `note`, and the document now reads `doc`.
+    /// Another file than the document's opens fresh; the same file is an
+    /// external change. Nothing happens to a document that picked up unsaved
+    /// edits or a save during the read — the read is put off again instead.
+    fn loaded(&mut self, doc: &str, note: Note) -> Option<Change> {
+        if self.dirty || self.in_flight > 0 {
+            self.behind = true;
+            return None;
+        }
+        if note.path != self.path {
+            self.path = note.path;
+            return Some(Change::Open(note.text));
+        }
+        self.external(doc, &note.text)
     }
 
     /// The file changed underneath the editor and now reads `incoming`. `None`
@@ -309,25 +419,18 @@ impl Ledger {
 /// unless there are unsaved edits, which win.
 fn follow_external_changes(autosave: Autosave) {
     ipc::listen::<(), _>(events::NOTE_CHANGED_EXTERNALLY, move |()| {
-        // Not worth the round trip; the ledger would refuse it anyway.
-        if autosave.ledger.borrow().dirty {
-            return;
-        }
-        let autosave = autosave.clone();
-        spawn_local(async move {
-            let Ok(text) = ipc::fetch::<String>(commands::READ_NOTE).await else {
-                return;
-            };
-            let Some(doc) = autosave.doc() else {
-                return;
-            };
-            // Asked after the read, not before: the read was a round trip, and
-            // a keystroke during it would make this reload a clobber.
-            let change = autosave.ledger.borrow().external(&doc, &text);
-            if let Some(change) = change {
-                autosave.apply(change);
-            }
-        });
+        autosave.follow();
+    });
+}
+
+/// Open the new file when Settings moves the notes path (#5). Whatever is
+/// still unsaved goes to the old file first: the save names it, and the read
+/// waits for the save. Any other settings change reads the same file back,
+/// which costs one round trip and changes nothing.
+fn follow_note_path(autosave: Autosave) {
+    ipc::listen::<Settings, _>(events::SETTINGS_CHANGED, move |_| {
+        autosave.flush();
+        autosave.follow();
     });
 }
 
@@ -404,7 +507,22 @@ mod tests {
         let sent = ledger
             .begin_save(|| Some(text.to_string()))
             .expect("an edit to save");
-        (ledger, sent)
+        (ledger, sent.text)
+    }
+
+    fn note(path: &str, text: &str) -> Note {
+        Note {
+            path: path.to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    /// A ledger the way the first read leaves it: clean, on file `a`.
+    fn on_a() -> Ledger {
+        Ledger {
+            path: "a".to_string(),
+            ..Ledger::default()
+        }
     }
 
     #[test]
@@ -438,7 +556,8 @@ mod tests {
 
         let sent = ledger
             .begin_save(|| Some(OLDER.to_string()))
-            .expect("still dirty, so the retry has something to send");
+            .expect("still dirty, so the retry has something to send")
+            .text;
         let change = ledger.finish_save(&sent, Ok(sent.clone()), || Some(sent.clone()));
         assert_eq!(change, None);
         assert!(!ledger.dirty);
@@ -519,5 +638,94 @@ mod tests {
     fn the_trailing_newline_alone_is_not_an_external_change() {
         let unterminated = OLDER.trim_end_matches('\n');
         assert_eq!(Ledger::default().external(unterminated, OLDER), None);
+    }
+
+    #[test]
+    fn a_save_names_the_file_it_came_from() {
+        let mut ledger = on_a();
+        ledger.edited();
+        let args = ledger.begin_save(|| Some(OLDER.to_string())).expect("args");
+        assert_eq!(args.path, "a");
+    }
+
+    /// #5: the notes path moved, so the read names another file. It opens
+    /// fresh, and the saves after it name the new file.
+    #[test]
+    fn another_file_opens_fresh() {
+        let mut ledger = on_a();
+        assert_eq!(
+            ledger.loaded(OLDER, note("b", ENTRY)),
+            Some(Change::Open(ENTRY.to_string()))
+        );
+        assert_eq!(ledger.path, "b");
+
+        ledger.edited();
+        let args = ledger.begin_save(|| Some(ENTRY.to_string())).expect("args");
+        assert_eq!(args.path, "b");
+    }
+
+    #[test]
+    fn the_same_file_is_an_external_change() {
+        let incoming = document::splice(OLDER, ENTRY);
+        assert_eq!(
+            on_a().loaded(OLDER, note("a", &incoming)),
+            Some(Change::Insert {
+                at: 0,
+                text: format!("{ENTRY}\n"),
+            })
+        );
+    }
+
+    /// Edits waiting when the path moves are saved to the old file before
+    /// the new one is read: the read waits for the edit and for its save.
+    #[test]
+    fn a_read_waits_for_unsaved_edits_and_their_save() {
+        let mut ledger = on_a();
+        ledger.edited();
+        assert!(!ledger.may_read(), "read under unsaved edits");
+
+        let sent = ledger.begin_save(|| Some(OLDER.to_string())).expect("args");
+        assert_eq!(sent.path, "a");
+        assert!(!ledger.catch_up(), "read with a save in flight");
+        assert!(!ledger.may_read(), "read with a save in flight");
+
+        ledger.finish_save(&sent.text, Ok(sent.text.clone()), || {
+            Some(sent.text.clone())
+        });
+        assert!(ledger.catch_up(), "the put-off read never happened");
+        assert!(!ledger.catch_up(), "the put-off read happened twice");
+        assert!(ledger.may_read());
+    }
+
+    /// A save that fails leaves the read put off: the editor stays on the
+    /// file its text belongs to rather than dropping the text.
+    #[test]
+    fn a_failed_save_keeps_the_editor_on_its_file() {
+        let mut ledger = on_a();
+        ledger.edited();
+        assert!(!ledger.may_read());
+        let sent = ledger.begin_save(|| Some(OLDER.to_string())).expect("args");
+        ledger.finish_save(&sent.text, Err(CONFLICT.to_string()), || {
+            Some(sent.text.clone())
+        });
+        assert!(!ledger.catch_up());
+        assert_eq!(ledger.path, "a");
+    }
+
+    /// A keystroke or a save during the read's round trip: the read is not
+    /// applied, the document stays on its file, and the read is put off.
+    #[test]
+    fn a_read_that_lands_on_new_edits_is_put_off() {
+        let mut ledger = on_a();
+        assert!(ledger.may_read());
+        ledger.edited();
+        assert_eq!(ledger.loaded(OLDER, note("b", ENTRY)), None);
+        assert_eq!(ledger.path, "a");
+
+        let sent = ledger.begin_save(|| Some(OLDER.to_string())).expect("args");
+        ledger.finish_save(&sent.text, Ok(sent.text.clone()), || {
+            Some(sent.text.clone())
+        });
+        assert!(ledger.catch_up());
     }
 }

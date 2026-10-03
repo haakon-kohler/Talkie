@@ -10,12 +10,23 @@
 //!
 //! A naive watcher fires on the editor's own autosave and hands the file back to
 //! the editor that just wrote it. Rather than trying to suppress events by
-//! timing, this module tracks a hash of the content Talkie last *knew about* —
-//! set by `read_note` and `write_note` — and emits only when what lands on disk
-//! differs from it. Self-inflicted events therefore cost one hash and stop
-//! there, and the capture pipeline's `append` deliberately does not update the
-//! hash, so a silent capture reaches the editor by exactly the same path an
-//! external edit does.
+//! timing, this module tracks the content Talkie last *knew about* — set by
+//! `read_note` and `write_note`, and by each report — and emits only when what
+//! lands on disk differs from it. Self-inflicted events therefore cost one
+//! comparison and stop there, and the capture pipeline's `prepend` deliberately
+//! does not update it, so a silent capture reaches the editor by exactly the
+//! same path an external edit does.
+//!
+//! ## The merge base is not the watcher's
+//!
+//! What the watcher last saw and what the editor last loaded are two values,
+//! kept apart on purpose. The watcher moves its own as soon as the file
+//! settles, whether or not the editor took the change in — a dirty editor
+//! ignores it. If saves merged against that, a capture that landed under
+//! unsaved edits would look like nothing at all, and the next save would write
+//! over it; so would a file the editor never showed, after the notes path
+//! moved (#5). The base a save merges against is therefore moved only by
+//! `read_note` and `write_note`, and it remembers which file it came from.
 //!
 //! The directory is watched, not the file: editors save by writing a temporary
 //! file and renaming it over the target — Talkie's own `note::write` included —
@@ -44,38 +55,83 @@ const SETTLE: Duration = Duration::from_millis(150);
 /// to the note — must not starve the editor of updates forever.
 const MAX_SETTLE_ROUNDS: usize = 20;
 
-/// The live watch, managed as Tauri state.
+/// The live watch, managed as Tauri state, and the editor's merge base beside
+/// it.
 pub struct NoteWatcher {
     /// Dropping the previous watcher is what stops it, so re-arming is just a
     /// replace. The thread behind it ends on its own when the channel closes.
     watcher: Mutex<Option<RecommendedWatcher>>,
-    /// The content Talkie last read or wrote. `None` before the first read,
-    /// which makes the first external event unconditionally interesting.
-    ///
-    /// The text itself, not a hash of it: it is the *base* a save merges
-    /// against when the file moved underneath the editor, and a hash cannot be
-    /// diffed.
-    ///
-    /// Shared with the watch thread, which records what it finds on disk.
-    seen: Arc<Mutex<Option<String>>>,
+    /// What Talkie last knew to be on disk. Shared with the watch thread,
+    /// which records what it finds there.
+    seen: Arc<Mutex<Seen>>,
+    /// What the editor last read or saved. Never moved by the watch thread.
+    base: Mutex<Option<Base>>,
+}
+
+/// The watcher's half: what is on disk, as far as Talkie knows.
+#[derive(Default)]
+struct Seen {
+    /// `None` before the first read, which makes the first external event
+    /// unconditionally interesting.
+    text: Option<String>,
+    /// Which watch may still record into `text`. Re-arming bumps it, so a
+    /// thread retired mid-flurry — its channel closed under it — cannot read
+    /// the old file into `text` or report it after the switch.
+    generation: u64,
+}
+
+/// The editor's half: the text its document was last read from or saved as.
+///
+/// The text itself, not a hash of it: it is the *base* a save merges against
+/// when the file moved underneath the editor, and a hash cannot be diffed.
+struct Base {
+    /// The file it came from. A save to any other file has no base at all.
+    path: PathBuf,
+    text: String,
 }
 
 impl NoteWatcher {
     pub(crate) fn new() -> Self {
         Self {
             watcher: Mutex::new(None),
-            seen: Arc::new(Mutex::new(None)),
+            seen: Arc::new(Mutex::new(Seen::default())),
+            base: Mutex::new(None),
         }
     }
 
     /// Remember content as Talkie's own, so the watcher stays quiet about it.
     pub fn remember(&self, text: &str) {
-        *self.seen.lock().expect("watcher mutex poisoned") = Some(text.to_string());
+        self.seen.lock().expect("watcher mutex poisoned").text = Some(text.to_string());
     }
 
-    /// What Talkie last saw on disk — the base for a merge.
+    /// The editor now holds `text` as the contents of `path`: it becomes the
+    /// base the next save merges against, and the watcher stays quiet about it.
+    pub fn adopt(&self, path: &Path, text: &str) {
+        *self.base.lock().expect("watcher mutex poisoned") = Some(Base {
+            path: path.to_path_buf(),
+            text: text.to_string(),
+        });
+        self.remember(text);
+    }
+
+    /// The base for a save to `path`: what the editor last read from or saved
+    /// to that file. `None` when the editor's last read or save was another
+    /// file, or there was none.
+    pub fn base(&self, path: &Path) -> Option<String> {
+        let base = self.base.lock().expect("watcher mutex poisoned");
+        base.as_ref()
+            .filter(|base| base.path == path)
+            .map(|base| base.text.clone())
+    }
+
+    /// What Talkie last saw on disk.
+    #[cfg(test)]
     pub fn last_seen(&self) -> Option<String> {
-        self.seen.lock().expect("watcher mutex poisoned").clone()
+        self.seen
+            .lock()
+            .expect("watcher mutex poisoned")
+            .text
+            .clone()
     }
 
     /// Start watching `path`, replacing any previous watch.
@@ -102,6 +158,13 @@ impl NoteWatcher {
             .watch(&directory, RecursiveMode::NonRecursive)
             .with_context(|| format!("could not watch {directory:?}"))?;
 
+        // Retire the previous thread before this one can report anything: from
+        // here on, only this generation records what it finds.
+        let generation = {
+            let mut seen = self.seen.lock().expect("watcher mutex poisoned");
+            seen.generation += 1;
+            seen.generation
+        };
         let seen = Arc::clone(&self.seen);
         let watched = path.to_path_buf();
         std::thread::Builder::new()
@@ -120,7 +183,7 @@ impl NoteWatcher {
                     while rounds < MAX_SETTLE_ROUNDS && rx.recv_timeout(SETTLE).is_ok() {
                         rounds += 1;
                     }
-                    if noticed(&seen, &watched) {
+                    if noticed(&seen, generation, &watched) {
                         on_change();
                     }
                 }
@@ -132,15 +195,23 @@ impl NoteWatcher {
     }
 }
 
-/// Whether `text` is news, and if so remember it. One call, because every
-/// caller does both and doing them separately invites a race.
-fn take_if_new(seen: &Mutex<Option<String>>, text: &str) -> bool {
-    let mut seen = seen.lock().expect("watcher mutex poisoned");
-    if seen.as_deref() == Some(text) {
-        return false;
+#[cfg(test)]
+fn take_if_new(seen: &Mutex<Seen>, text: &str) -> bool {
+    seen.lock()
+        .expect("watcher mutex poisoned")
+        .take_if_new(text)
+}
+
+impl Seen {
+    /// Whether `text` is news, and if so remember it. One call, because every
+    /// caller does both and doing them separately invites a race.
+    fn take_if_new(&mut self, text: &str) -> bool {
+        if self.text.as_deref() == Some(text) {
+            return false;
+        }
+        self.text = Some(text.to_string());
+        true
     }
-    *seen = Some(text.to_string());
-    true
 }
 
 /// Register the watcher state. Called once, from `lib.rs`, before `arm`.
@@ -187,10 +258,15 @@ fn concerns(event: &notify::Result<Event>, path: &Path) -> bool {
 }
 
 /// Read the file and decide whether it is news — if what is there is not
-/// already ours.
-fn noticed(seen: &Mutex<Option<String>>, path: &Path) -> bool {
+/// already ours, and the watch that asks is still the live one.
+fn noticed(seen: &Mutex<Seen>, generation: u64, path: &Path) -> bool {
     match note::read(path) {
-        Ok(text) => take_if_new(seen, &text),
+        // Checked under the lock that records it, after the read: the path
+        // can change while the file is being read.
+        Ok(text) => {
+            let mut seen = seen.lock().expect("watcher mutex poisoned");
+            seen.generation == generation && seen.take_if_new(&text)
+        }
         Err(e) => {
             log::warn!("talkie: could not read {}: {e:#}", path.display());
             false
@@ -279,10 +355,8 @@ mod tests {
 
     /// The thread behind the old watch can be mid-flurry when the path
     /// changes. Dropping the watcher ends the flurry early, and the thread
-    /// then reads the *old* file into the merge base and reports it — after
-    /// the switch, and after anything the switch did to the base.
+    /// used to read the *old* file and report it after the switch.
     #[test]
-    #[ignore = "#5: a re-arm mid-flurry still reports the old file after the switch"]
     fn a_rearm_mid_flurry_does_not_report_the_old_file() {
         let (a, b) = two_notes("mid-flurry");
         let watcher = NoteWatcher::new();

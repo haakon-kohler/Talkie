@@ -45,11 +45,12 @@ pub mod commands {
     pub const GET_ACCESSIBILITY: &str = "get_accessibility";
     /// Open System Settings at the Accessibility pane.
     pub const OPEN_ACCESSIBILITY_SETTINGS: &str = "open_accessibility_settings";
-    /// Read the note file. Returns its text, or an empty string when it does
-    /// not exist yet.
+    /// Read the note file. Returns a `Note`: its text, or an empty string when
+    /// it does not exist yet, and which file it is.
     pub const READ_NOTE: &str = "read_note";
-    /// Write the note file. The editor's autosave, and the only writer other
-    /// than the capture pipeline's append.
+    /// Write the note file the editor last read, named by `WriteNoteArgs`. The
+    /// editor's autosave, and the only writer other than the capture
+    /// pipeline's prepend.
     pub const WRITE_NOTE: &str = "write_note";
     /// Bind the shortcut again — the way back from a grant that arrived after
     /// the app had already given up on the keyboard.
@@ -176,9 +177,21 @@ pub struct MicrophoneInfo {
     pub is_default: bool,
 }
 
+/// What `read_note` returns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Note {
+    /// The resolved path of the file that was read. Opaque to the UI: it only
+    /// compares it and hands it back with each save, so the text goes to the
+    /// file it came from even after the notes path has moved on.
+    pub path: String,
+    pub text: String,
+}
+
 /// Argument payload for `write_note`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WriteNoteArgs {
+    /// `Note::path` of the file the text came from.
+    pub path: String,
     pub text: String,
 }
 

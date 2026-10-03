@@ -43,23 +43,36 @@ pub fn ShortcutField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
     };
 
     let commit = move |hotkey: String| {
-        let Some(mut current) = settings.get_untracked() else {
+        let Some(shown) = settings.get_untracked() else {
             return;
         };
-        if current.shortcut == hotkey {
+        if shown.shortcut == hotkey {
             finish();
             return;
         }
-        current.shortcut = hotkey.clone();
 
         spawn_local(async move {
-            let args = SetSettingsArgs {
-                settings: current.clone(),
+            // The host's settings, not the form's: the form may hold a notes
+            // path that was typed but never saved, and recording a shortcut
+            // must not save it on the way past (#5).
+            let mut current = match ipc::fetch::<Settings>(commands::GET_SETTINGS).await {
+                Ok(current) => current,
+                Err(e) => {
+                    error.set(e);
+                    finish();
+                    return;
+                }
             };
+            current.shortcut = hotkey.clone();
+            let args = SetSettingsArgs { settings: current };
             // The host validates and re-binds; an unbindable combination comes
             // back as an error and the old shortcut is left alone.
             match ipc::call_void(commands::SET_SETTINGS, &args).await {
-                Ok(()) => settings.set(Some(current)),
+                Ok(()) => settings.update(|s| {
+                    if let Some(s) = s {
+                        s.shortcut = hotkey;
+                    }
+                }),
                 Err(e) => error.set(e),
             }
             finish();

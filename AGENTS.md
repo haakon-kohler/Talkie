@@ -170,7 +170,11 @@ src-tauri/src/
   the editor may be open with unsaved edits, and Obsidian may be in the file too.
   Saves go through `document::reconcile`, which carries an external capture over
   into the editor's text and refuses anything it cannot merge. Do not "simplify"
-  that back into a plain write.
+  that back into a plain write. The base it merges against is what the
+  *editor* last read or saved, tagged with that file's path, and never what
+  the watcher has seen since: a watcher-moved base turned a capture under
+  unsaved edits, or a notes-path change, into a silent overwrite (#5). Every
+  save names the file its text came from.
 - **`PROGRESS.md` keeps no backlog.** Track the current milestone and the next
   one. Do not add a "later" section, and do not reinstate one you find deleted —
   deferred work either comes back on its own or was never worth listing.
