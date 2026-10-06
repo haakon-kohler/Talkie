@@ -21,15 +21,20 @@ use crate::shortcut::ShortcutField;
 pub fn SettingsPage() -> impl IntoView {
     let settings = RwSignal::new(None::<Settings>);
     let status = RwSignal::new(String::new());
-    let microphones = RwSignal::new(Vec::<MicrophoneInfo>::new());
+    // `None` until the list has been taken at least once.
+    let microphones = RwSignal::new(None::<Vec<MicrophoneInfo>>);
 
     // The device list is a snapshot with nothing to invalidate it — cpal has
     // no device-change notification — so it is taken again every time the
-    // list is about to be looked at.
+    // list is about to be looked at, and never before. Enumerating inputs
+    // reads each device's stream formats, which macOS counts as asking for
+    // the microphone; this window is built hidden at launch, so taking the
+    // list on mount put the system prompt on screen before onboarding had
+    // reached its microphone step.
     let refresh_microphones = move || {
         spawn_local(async move {
             match ipc::fetch::<Vec<MicrophoneInfo>>(commands::LIST_MICROPHONES).await {
-                Ok(list) => microphones.set(list),
+                Ok(list) => microphones.set(Some(list)),
                 Err(e) => web_sys::console::warn_1(
                     &format!("talkie: could not list microphones: {e}").into(),
                 ),
@@ -44,7 +49,6 @@ pub fn SettingsPage() -> impl IntoView {
                 Err(e) => status.set(format!("Could not read settings: {e}")),
             }
         });
-        refresh_microphones();
     });
 
     // The panel answers with a path and nothing else; the field takes it and
@@ -126,7 +130,8 @@ pub fn SettingsPage() -> impl IntoView {
                     >
                         {move || {
                             let chosen = settings.get().and_then(|s| s.microphone);
-                            let list = microphones.get();
+                            let fetched = microphones.get();
+                            let list = fetched.clone().unwrap_or_default();
                             let mut options = vec![view! {
                                 // COPY: settings.microphone.default — placeholder
                                 <option value="" selected=chosen.is_none()>"System default"</option>
@@ -141,10 +146,17 @@ pub fn SettingsPage() -> impl IntoView {
                             // now stays visible, marked, rather than silently
                             // reading as the default while the store says
                             // otherwise. The recorder falls back on its own.
+                            // Before the first look it is only shown, not
+                            // judged: nothing is known about it yet.
                             if let Some(name) = chosen.filter(|name| !list.iter().any(|m| &m.name == name)) {
-                                options.push(view! {
+                                let label = if fetched.is_some() {
                                     // COPY: settings.microphone.missing — placeholder
-                                    <option value=name.clone() selected=true>{format!("{name} (not connected)")}</option>
+                                    format!("{name} (not connected)")
+                                } else {
+                                    name.clone()
+                                };
+                                options.push(view! {
+                                    <option value=name.clone() selected=true>{label}</option>
                                 }.into_any());
                             }
                             options
