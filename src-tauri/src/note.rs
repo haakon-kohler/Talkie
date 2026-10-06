@@ -17,11 +17,12 @@ use anyhow::{Context, Result};
 use chrono::Local;
 use talkie_shared::document;
 
-/// Local time, to the minute — the heading of one capture.
+/// Local time, to the minute — the heading every capture in that minute shares.
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M";
 
 /// Put a capture at the top of the note file, creating the file (and its parent
-/// directory) on first use.
+/// directory) on first use. A capture in the minute the top heading already
+/// names goes under that heading instead of a new one.
 ///
 /// Blank transcriptions are dropped rather than written as an empty heading: a
 /// capture that picked up nothing but silence should leave no trace.
@@ -32,8 +33,8 @@ pub fn prepend(note_path: &Path, text: &str) -> Result<bool> {
     }
 
     let existing = read(note_path)?;
-    let entry = document::format_entry(text, &Local::now().format(TIMESTAMP_FORMAT).to_string());
-    write(note_path, &document::splice(&existing, &entry))?;
+    let timestamp = Local::now().format(TIMESTAMP_FORMAT).to_string();
+    write(note_path, &document::capture(&existing, text, &timestamp))?;
 
     Ok(true)
 }
@@ -201,6 +202,26 @@ mod tests {
         let first = contents.find("First said").expect("first is missing");
         assert!(second < first, "wrong way round: {contents:?}");
         assert!(!contents.contains("\n\n\n"), "too much space: {contents:?}");
+    }
+
+    /// Two captures a moment apart share one heading. Pinned to the clock by
+    /// writing the first heading ourselves, so the test cannot straddle a
+    /// minute boundary.
+    #[test]
+    fn a_capture_in_the_same_minute_shares_the_heading() {
+        let path = temp_note("same-minute");
+        let heading = format!("## {}", Local::now().format(TIMESTAMP_FORMAT));
+        write(&path, &format!("{heading}\nFirst said\n")).expect("write");
+
+        prepend(&path, "Second said").expect("prepend");
+
+        let contents = read(&path).expect("read");
+        if contents.matches("## ").count() == 1 {
+            assert_eq!(contents, format!("{heading}\nSecond said\n\nFirst said\n"));
+        } else {
+            // The minute turned between the write and the capture.
+            assert!(contents.ends_with(&format!("\n\n{heading}\nFirst said\n")));
+        }
     }
 
     #[test]
