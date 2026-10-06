@@ -284,8 +284,9 @@ struct Ledger {
 /// What to do to the document to bring it in line with the file.
 #[derive(Debug, PartialEq, Eq)]
 enum Change {
-    /// Text added at the top — the shape of a silent capture — inserted at this
-    /// byte offset, so the cursor and the undo history survive it.
+    /// Text added at the top — a new entry, or a paragraph under the top
+    /// heading, the two shapes of a silent capture — inserted at this byte
+    /// offset, so the cursor and the undo history survive it.
     Insert { at: usize, text: String },
     /// Anything else replaces the document.
     Replace(String),
@@ -350,10 +351,10 @@ impl Ledger {
             return None;
         }
         match document::inserted_at_head(sent, &saved) {
-            Some(inserted) => Some(Change::Insert {
-                at: document::insertion_offset(&doc()?),
-                text: inserted.to_string(),
-            }),
+            Some(inserted) => {
+                let (at, text) = document::carry_over(&doc()?, &inserted);
+                Some(Change::Insert { at, text })
+            }
             // Not a capture after all. Only safe with nothing unsaved.
             None if !self.dirty => Some(Change::Replace(saved)),
             None => None,
@@ -407,8 +408,8 @@ impl Ledger {
         }
         Some(match document::inserted_at_head(doc, incoming) {
             Some(inserted) => Change::Insert {
-                at: document::insertion_offset(doc),
-                text: inserted.to_string(),
+                at: inserted.at,
+                text: inserted.text.to_string(),
             },
             None => Change::Replace(incoming.to_string()),
         })
@@ -630,6 +631,38 @@ mod tests {
             Some(Change::Insert {
                 at: 0,
                 text: format!("{ENTRY}\n"),
+            })
+        );
+    }
+
+    /// A capture in the same minute as the top entry lands under its heading,
+    /// and the editor takes it in at the same place.
+    #[test]
+    fn an_external_capture_that_joined_the_top_heading_is_an_insert() {
+        let incoming = document::capture(OLDER, "Newer", "2026-08-18 09:14");
+        assert_eq!(
+            Ledger::default().external(OLDER, &incoming),
+            Some(Change::Insert {
+                at: "## 2026-08-18 09:14\n".len(),
+                text: "Newer\n\n".to_string(),
+            })
+        );
+    }
+
+    /// The same, carried over by a save while the user kept typing in the
+    /// entry the capture joined.
+    #[test]
+    fn a_joined_capture_carried_over_by_a_save_stays_under_its_heading() {
+        let (mut ledger, sent) = saving(OLDER);
+        ledger.edited();
+        let saved = document::capture(&sent, "Newer", "2026-08-18 09:14");
+        let now = format!("{OLDER}And more.\n");
+
+        assert_eq!(
+            ledger.finish_save(&sent, Ok(saved), || Some(now)),
+            Some(Change::Insert {
+                at: "## 2026-08-18 09:14\n".len(),
+                text: "Newer\n\n".to_string(),
             })
         );
     }
