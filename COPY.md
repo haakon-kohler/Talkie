@@ -295,6 +295,14 @@ Conflict (`editor.trouble.conflict`) — *live*
 
 > The notes file changed outside Talkie, so this text was not saved.
 
+Moved (`editor.trouble.moved`) — *live*
+
+> This text is from a notes file Talkie has stopped using, so it was not saved.
+
+Only reachable when the notes path moves in Settings while a save is still on
+its way to the old file. The editor waits for its saves before opening the new
+file, so this should not normally show.
+
 The same strip shows a failed capture (the `capture.*` sentences below) until
 the next capture starts. A save failure takes precedence if both are pending.
 

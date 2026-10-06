@@ -303,6 +303,16 @@ every file written in the old order is one more file with a seam in it.
   it; a different file name is still typed into the field.
 - The panel runs as a sheet on the settings window, so it cannot be built
   before that window exists and the command refuses if it is not there.
+- Changing the notes path used to leave the editor on the old file and could
+  overwrite the new one (#5). The cause was wider than the path: the merge
+  base a save reconciles against was whatever the watcher last saw, so it
+  moved under unsaved edits and the next save wrote blind. The base is now
+  what the editor last read or saved, tagged with its file; `write_note` names
+  the file the text came from and refuses any other. The editor follows
+  `SETTINGS_CHANGED` by saving what it holds to the old file, then opening the
+  new one in a fresh CodeMirror — a `setDoc` would keep undo, and one ⌘Z would
+  carry the old file into the new. Left as it was: an editor stuck on a
+  conflict stays stuck, and on its own file, until a save succeeds.
 - The microphone list is enumerated on every open (focus or pointer-enter),
   because cpal has no device-change notification to cache against. The
   setting still stores a name and nothing else — cpal 0.16 exposes no id — so
