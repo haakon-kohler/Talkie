@@ -256,20 +256,9 @@ every file written in the old order is one more file with a seam in it.
       lives inside CodeMirror's configuration, so it means regenerating the
       bundle per `ui/assets/vendor/README.md` and keeping `cm.rs` in step.
 
-- [ ] **One heading per minute, not per capture.** Two captures inside the same
-      minute currently produce two identical `## 2026-08-18 09:14` headings.
-      They should share one: the newer capture puts its text under the heading
-      that is already at the top of the file.
-
-      This changes the document contract, which is public API — "one H2 per
-      capture" becomes "one H2 per minute of capture" — so it lands in
-      `note.rs`, `README.md`, `AGENTS.md` and the contract tests together. Two
-      things to keep true while doing it: the result must still be a pure
-      *insertion at the head*, or `document::inserted_at_head` stops
-      recognising captures and the editor's save-merge loses the property it
-      relies on; and the check has to read the file's existing head rather than
-      remember the last capture, because the file changes underneath Talkie
-      between captures.
+- [x] **One heading per minute, not per capture.** A capture in the minute the
+      top heading already names goes directly under it, newest paragraph first,
+      a blank line between paragraphs (`document::capture`).
 
 - [ ] **A way to open the notepad from the keyboard — mechanism undecided.**
       Double-tapping the capture shortcut is *not* the answer: it would put the
@@ -320,6 +309,17 @@ every file written in the old order is one more file with a seam in it.
   stays in the list marked "(not connected)" rather than disappearing; the
   recorder already falls back to the default with a warning, so nothing
   refuses the save.
+
+- "The same minute" is the clock minute the heading shows, not a rolling 60
+  seconds: 09:14:59 and 09:15:01 get two headings. It is the rule that can be
+  read off the file alone, and only the top heading is ever checked — read from
+  disk at capture time, never remembered.
+- A joined capture is not an insertion at the insertion point; the heading
+  already sits there. `inserted_at_head` now recognises a second place, just
+  under the top heading, and reports which one it found. Carrying such a
+  capture into the editor's text puts it under the same heading if the editor
+  still opens with it, and otherwise brings the heading along as a new entry —
+  the heading can be edited away mid-capture, the capture cannot.
 
 ## M4 — Shippable
 

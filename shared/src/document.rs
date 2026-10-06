@@ -15,6 +15,8 @@
 //! ## 2026-08-18 09:41
 //! The newest capture.
 //!
+//! An earlier capture from the same minute.
+//!
 //! ## 2026-08-18 09:14
 //! An older one.
 //! ```
@@ -22,6 +24,12 @@
 //! **Newest first.** A capture goes at the top, not the bottom, so scrolling
 //! down walks backwards through time and the thing you just said is the thing
 //! you are looking at.
+//!
+//! **One heading per minute.** A capture made in the minute the top heading
+//! already names goes directly under that heading, as its own paragraph, rather
+//! than under a second identical one. Only the top heading is checked, and it
+//! is read from the file rather than remembered, because the file changes
+//! underneath Talkie between captures.
 //!
 //! "The top" is not byte zero: YAML frontmatter and a leading `#` title stay
 //! where they are. Inserting above frontmatter would break Obsidian integration.
@@ -34,6 +42,28 @@ use serde::{Deserialize, Serialize};
 /// wasm as well as native, and a clock is not something it should own.
 pub fn format_entry(text: &str, timestamp: &str) -> String {
     format!("## {timestamp}\n{}\n", text.trim())
+}
+
+/// Add a capture to `text`: under the top heading when that heading is
+/// already `timestamp`'s minute, otherwise as a new entry at the insertion
+/// point.
+///
+/// Either way the result is a pure insertion that [`inserted_at_head`]
+/// recognises, which is what lets the editor's save carry a capture over.
+pub fn capture(text: &str, body: &str, timestamp: &str) -> String {
+    let heading = format!("## {timestamp}");
+    match top_heading(text) {
+        Some((top, at)) if top == heading => {
+            let (head, tail) = text.split_at(at);
+            let out = format!("{head}{}{tail}", paragraph(body, tail));
+            debug_assert!(
+                inserted_at_head(text, &out).is_some(),
+                "joining a heading was not an insertion at the head"
+            );
+            out
+        }
+        _ => splice(text, &format_entry(body, timestamp)),
+    }
 }
 
 /// The trailing newline every version of the file ends with.
@@ -110,31 +140,74 @@ pub fn splice(text: &str, entry: &str) -> String {
     out
 }
 
+/// Text that arrived at the head of the document: a new entry at the insertion
+/// point, or a paragraph under the top heading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Inserted<'a> {
+    /// The byte offset in the older text the insertion was made at.
+    pub at: usize,
+    /// What was inserted there.
+    pub text: &'a str,
+    /// The top heading `text` went under, or `None` when it went in at the
+    /// insertion point.
+    pub under: Option<&'a str>,
+}
+
 /// What was inserted at the head of `base` to produce `newer` — if an insertion
 /// at the head is all that happened.
 ///
-/// This is how a capture is recognised. It is deliberately strict: everything
-/// before the insertion point and everything after it must be untouched, or the
+/// This is how a capture is recognised, and the head has two places in it: the
+/// insertion point, where a new entry goes, and just under the top heading,
+/// where a capture from the same minute goes. It is deliberately strict:
+/// everything either side of one of those places must be untouched, or the
 /// change was something else and the caller must not treat it as a capture.
-pub fn inserted_at_head<'a>(base: &str, newer: &'a str) -> Option<&'a str> {
+pub fn inserted_at_head<'a>(base: &'a str, newer: &'a str) -> Option<Inserted<'a>> {
     if newer.len() <= base.len() {
         return None;
     }
     let at = insertion_offset(base);
-    let (head, tail) = base.split_at(at);
-
-    if !newer.starts_with(head) || !newer.ends_with(tail) {
-        return None;
+    if let Some(text) = inserted_at(base, newer, at) {
+        return Some(Inserted {
+            at,
+            text,
+            under: None,
+        });
     }
-    let rest = &newer[head.len()..];
-    let inserted_len = rest.len().checked_sub(tail.len())?;
-    let inserted = &rest[..inserted_len];
-    debug_assert_eq!(
-        newer.len(),
-        base.len() + inserted.len(),
-        "the insertion does not account for the whole difference"
-    );
-    Some(inserted)
+    let (heading, at) = top_heading(base)?;
+    inserted_at(base, newer, at).map(|text| Inserted {
+        at,
+        text,
+        under: Some(heading),
+    })
+}
+
+/// Where `inserted` belongs in `target`, a different version of the document
+/// from the one it was inserted into, and the text to put there.
+///
+/// A paragraph that went under a heading goes under the same heading in
+/// `target` if `target` still opens with it, and otherwise brings the heading
+/// with it as a new entry — the heading may have been edited away, but the
+/// capture must not be.
+pub fn carry_over(target: &str, inserted: &Inserted) -> (usize, String) {
+    let Some(heading) = inserted.under else {
+        return (insertion_offset(target), inserted.text.to_string());
+    };
+    match top_heading(target) {
+        Some((top, at)) if top == heading => (at, paragraph(inserted.text, &target[at..])),
+        _ => {
+            let at = insertion_offset(target);
+            let (head, tail) = target.split_at(at);
+            let lead = if head.is_empty() || head.ends_with("\n\n") {
+                ""
+            } else if head.ends_with('\n') {
+                "\n"
+            } else {
+                "\n\n"
+            };
+            let entry = format!("{heading}\n{}", paragraph(inserted.text, tail));
+            (at, format!("{lead}{entry}"))
+        }
+    }
 }
 
 /// What a save should do, given three versions of the document.
@@ -167,12 +240,71 @@ pub fn reconcile(incoming: &str, on_disk: &str, base: Option<&str>) -> Save {
         // Something arrived at the top. Put it at the top of the editor's text
         // too, wherever that text's own insertion point now is.
         Some(base) => match inserted_at_head(base, on_disk) {
-            Some(inserted) => Save::Write(splice(&incoming, inserted)),
+            Some(Inserted {
+                text, under: None, ..
+            }) => Save::Write(splice(&incoming, text)),
+            Some(inserted) => {
+                let (at, text) = carry_over(&incoming, &inserted);
+                let (head, tail) = incoming.split_at(at);
+                Save::Write(normalized(&format!("{head}{text}{tail}")))
+            }
             None => Save::Conflict,
         },
         // The editor never read the file, so there is no basis for a merge and
         // nothing to preserve.
         None => Save::Write(incoming),
+    }
+}
+
+/// What lies between `base[..at]` and `base[at..]` in `newer`, if `newer` is
+/// `base` with something inserted at `at`.
+fn inserted_at<'a>(base: &str, newer: &'a str, at: usize) -> Option<&'a str> {
+    let (head, tail) = base.split_at(at);
+    if !newer.starts_with(head) || !newer.ends_with(tail) {
+        return None;
+    }
+    let rest = &newer[head.len()..];
+    let inserted_len = rest.len().checked_sub(tail.len())?;
+    let inserted = &rest[..inserted_len];
+    debug_assert_eq!(
+        newer.len(),
+        base.len() + inserted.len(),
+        "the insertion does not account for the whole difference"
+    );
+    Some(inserted)
+}
+
+/// The heading of the top entry, trimmed, and the offset just under it — past
+/// the blank lines that follow, so a paragraph put there does not stack another
+/// on top of them.
+///
+/// `None` when the document does not open with an entry, or when the heading
+/// is the file's last line and has no newline to put anything after.
+fn top_heading(text: &str) -> Option<(&str, usize)> {
+    let start = insertion_offset(text);
+    let line = line_at(text, start);
+    if !line.starts_with("## ") || !line.ends_with('\n') {
+        return None;
+    }
+    let mut at = start + line.len();
+    while at < text.len() {
+        let line = line_at(text, at);
+        if !line.trim().is_empty() {
+            break;
+        }
+        at += line.len();
+    }
+    Some((line.trim_end(), at))
+}
+
+/// `body` as a paragraph to put in front of `tail`: trimmed, and followed by
+/// the blank line that separates it from whatever comes next.
+fn paragraph(body: &str, tail: &str) -> String {
+    let body = body.trim();
+    if tail.is_empty() {
+        format!("{body}\n")
+    } else {
+        format!("{body}\n\n")
     }
 }
 
@@ -284,7 +416,11 @@ mod tests {
         let newer = splice(base, ENTRY);
         assert_eq!(
             inserted_at_head(base, &newer),
-            Some("## 2026-08-18 09:41\nNewest\n\n")
+            Some(Inserted {
+                at: 0,
+                text: "## 2026-08-18 09:41\nNewest\n\n",
+                under: None,
+            })
         );
     }
 
@@ -378,6 +514,133 @@ mod tests {
         let b = "## 2026-10-02 10:00\nNew file\n";
         let stale = "## 2026-10-01 09:00\nOld file\ntyped\n";
         assert_eq!(reconcile(stale, b, None), Save::Write(stale.to_string()));
+    }
+
+    #[test]
+    fn a_capture_in_a_new_minute_starts_a_new_entry() {
+        let existing = "## 2026-08-18 09:14\nOlder\n";
+        assert_eq!(
+            capture(existing, "Newest", "2026-08-18 09:41"),
+            "## 2026-08-18 09:41\nNewest\n\n## 2026-08-18 09:14\nOlder\n"
+        );
+    }
+
+    /// The point of the change: a second capture in the same minute shares the
+    /// heading, newest paragraph first.
+    #[test]
+    fn a_capture_in_the_same_minute_joins_the_top_heading() {
+        let existing = "## 2026-08-18 09:14\nFirst\n\n## 2026-08-18 09:02\nOlder\n";
+        assert_eq!(
+            capture(existing, "  Second  ", "2026-08-18 09:14"),
+            "## 2026-08-18 09:14\nSecond\n\nFirst\n\n## 2026-08-18 09:02\nOlder\n"
+        );
+    }
+
+    #[test]
+    fn joining_respects_frontmatter_and_a_title() {
+        let existing = "---\ntags: [talkie]\n---\n\n# talkie.md\n\n## 2026-08-18 09:14\nFirst\n";
+        assert_eq!(
+            capture(existing, "Second", "2026-08-18 09:14"),
+            "---\ntags: [talkie]\n---\n\n# talkie.md\n\n## 2026-08-18 09:14\nSecond\n\nFirst\n"
+        );
+    }
+
+    /// Only the top heading counts. The same minute further down — an older
+    /// file, a hand edit — is not reached into.
+    #[test]
+    fn only_the_top_heading_is_joined() {
+        let existing = "## 2026-08-18 09:20\nTop\n\n## 2026-08-18 09:14\nFirst\n";
+        assert!(capture(existing, "Second", "2026-08-18 09:14")
+            .starts_with("## 2026-08-18 09:14\nSecond\n\n## 2026-08-18 09:20\n"));
+    }
+
+    #[test]
+    fn joining_an_empty_heading_leaves_no_trailing_blank_line() {
+        assert_eq!(
+            capture("## 2026-08-18 09:14\n", "Second", "2026-08-18 09:14"),
+            "## 2026-08-18 09:14\nSecond\n"
+        );
+    }
+
+    #[test]
+    fn joining_never_stacks_blank_lines() {
+        let existing = "## 2026-08-18 09:14\n\n\nFirst\n";
+        let joined = capture(existing, "Second", "2026-08-18 09:14");
+        assert_eq!(joined, "## 2026-08-18 09:14\n\n\nSecond\n\nFirst\n");
+        assert!(inserted_at_head(existing, &joined).is_some());
+    }
+
+    #[test]
+    fn recognises_a_capture_that_joined_the_top_heading() {
+        let base = "# talkie.md\n\n## 2026-08-18 09:14\nFirst\n";
+        let newer = capture(base, "Second", "2026-08-18 09:14");
+        assert_eq!(
+            inserted_at_head(base, &newer),
+            Some(Inserted {
+                at: "# talkie.md\n\n## 2026-08-18 09:14\n".len(),
+                text: "Second\n\n",
+                under: Some("## 2026-08-18 09:14"),
+            })
+        );
+    }
+
+    /// Typing in the top entry while a same-minute capture lands: both stay,
+    /// and the capture is under the heading it was spoken into.
+    #[test]
+    fn a_joined_capture_that_lands_mid_edit_is_carried_over() {
+        let base = "## 2026-08-18 09:14\nFirst\n";
+        let on_disk = capture(base, "Second", "2026-08-18 09:14");
+        let incoming = "## 2026-08-18 09:14\nFirst, and edited\n";
+
+        assert_eq!(
+            reconcile(incoming, &on_disk, Some(base)),
+            Save::Write("## 2026-08-18 09:14\nSecond\n\nFirst, and edited\n".to_string())
+        );
+    }
+
+    /// The editor deleted the entry the capture joined. The capture survives,
+    /// and brings its heading back with it.
+    #[test]
+    fn a_joined_capture_outlives_its_heading_being_deleted() {
+        let base = "## 2026-08-18 09:14\nFirst\n\n## 2026-08-18 09:02\nOlder\n";
+        let on_disk = capture(base, "Second", "2026-08-18 09:14");
+        let incoming = "## 2026-08-18 09:02\nOlder\n";
+
+        assert_eq!(
+            reconcile(incoming, &on_disk, Some(base)),
+            Save::Write("## 2026-08-18 09:14\nSecond\n\n## 2026-08-18 09:02\nOlder\n".to_string())
+        );
+    }
+
+    #[test]
+    fn a_resurrected_heading_keeps_its_distance_from_a_title() {
+        let base = "## 2026-08-18 09:14\nFirst\n";
+        let on_disk = capture(base, "Second", "2026-08-18 09:14");
+        let incoming = "# talkie.md\n";
+
+        assert_eq!(
+            reconcile(incoming, &on_disk, Some(base)),
+            Save::Write("# talkie.md\n\n## 2026-08-18 09:14\nSecond\n".to_string())
+        );
+    }
+
+    /// Carrying over into the very text it was inserted into reproduces the
+    /// insertion exactly — the editor relies on that to stay byte-identical to
+    /// the file.
+    #[test]
+    fn carrying_over_into_the_base_is_exact() {
+        let bases = [
+            "## 2026-08-18 09:14\nFirst\n",
+            "## 2026-08-18 09:14\n",
+            "# talkie.md\n\n## 2026-08-18 09:14\n\nFirst\n\n## 2026-08-18 09:02\nOlder\n",
+        ];
+        for base in bases {
+            let newer = capture(base, "Second", "2026-08-18 09:14");
+            let inserted = inserted_at_head(base, &newer).expect("not recognised");
+            let (at, text) = carry_over(base, &inserted);
+            assert_eq!(at, inserted.at, "base: {base:?}");
+            assert_eq!(text, inserted.text, "base: {base:?}");
+        }
     }
 
     #[test]
