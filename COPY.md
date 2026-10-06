@@ -303,8 +303,9 @@ the next capture starts. A save failure takes precedence if both are pending.
 ## Capture errors
 
 The pipeline is silent by design, so these are the only sentences it can say.
-All *live*, emitted on `talkie://capture-failed` and shown in the editor's
-trouble strip.
+All *live*, emitted on `talkie://capture-failed`, shown in the editor's
+trouble strip, and posted as a macOS notification titled "Talkie", because the
+windows are usually all closed when a capture fails.
 
 | ID | Text |
 | --- | --- |

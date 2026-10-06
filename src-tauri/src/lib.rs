@@ -55,6 +55,7 @@ pub fn run() {
         // path*, so a debug bundle beside an installed copy slips through.
         .plugin(tauri_plugin_single_instance::init(second_launch))
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::set_settings,
