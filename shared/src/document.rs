@@ -161,6 +161,9 @@ pub struct Inserted<'a> {
 /// where a capture from the same minute goes. It is deliberately strict:
 /// everything either side of one of those places must be untouched, or the
 /// change was something else and the caller must not treat it as a capture.
+/// Under the heading, what was inserted must also be a whole paragraph shaped
+/// the way [`capture`] writes one: that spot is the start of the top entry's
+/// text, where a hand edit is far likelier than at the insertion point.
 pub fn inserted_at_head<'a>(base: &'a str, newer: &'a str) -> Option<Inserted<'a>> {
     if newer.len() <= base.len() {
         return None;
@@ -174,7 +177,8 @@ pub fn inserted_at_head<'a>(base: &'a str, newer: &'a str) -> Option<Inserted<'a
         });
     }
     let (heading, at) = top_heading(base)?;
-    inserted_at(base, newer, at).map(|text| Inserted {
+    let text = inserted_at(base, newer, at)?;
+    (text == paragraph(text, &base[at..])).then_some(Inserted {
         at,
         text,
         under: Some(heading),
@@ -582,6 +586,19 @@ mod tests {
                 under: Some("## 2026-08-18 09:14"),
             })
         );
+    }
+
+    /// Typing at the start of the top entry's text, in another app, is an
+    /// insertion just under the heading too — but not a paragraph, so not a
+    /// capture, and a save over it conflicts rather than splitting the word off.
+    #[test]
+    fn an_edit_under_the_top_heading_is_not_a_capture() {
+        let base = "## 2026-08-18 09:14\nFirst\n";
+        let on_disk = "## 2026-08-18 09:14\nThe First\n";
+        assert_eq!(inserted_at_head(base, on_disk), None);
+
+        let incoming = "## 2026-08-18 09:14\nFirst, and edited\n";
+        assert_eq!(reconcile(incoming, on_disk, Some(base)), Save::Conflict);
     }
 
     /// Typing in the top entry while a same-minute capture lands: both stay,
