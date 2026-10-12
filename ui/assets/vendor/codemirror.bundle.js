@@ -28728,6 +28728,84 @@ const mdHighlight = HighlightStyle.define([
   { tag: tags$1.processingInstruction, class: "cm-md-mark" },
 ]);
 
+// -- Bold / italic ------------------------------------------------------------
+//
+// Cmd-B / Cmd-I with no toolbar and no hint: wrap the selection (or open an
+// empty pair at the cursor) and unwrap when it is already wrapped. Both markers
+// are asterisk runs, so presence is decided by counting the run shared by both
+// ends of the (selection-adjacent) text: an odd run is italic, two or more is
+// bold. That is what keeps Cmd-I on "**x**" producing "***x***" instead of
+// eating one star from the bold.
+
+function asteriskRun(text) {
+  let lead = 0;
+  while (lead < text.length && text[lead] === "*") lead++;
+  let trail = 0;
+  while (trail < text.length - lead && text[text.length - 1 - trail] === "*") trail++;
+  return Math.min(lead, trail);
+}
+
+function toggleInline(marker) {
+  return (view) => {
+    const changes = view.state.changeByRange((range) => {
+      const doc = view.state.doc;
+      const len = marker.length;
+      const { from, to } = range;
+
+      if (from === to) {
+        // An empty pair around the cursor closes; anywhere else one opens.
+        const before = doc.sliceString(Math.max(0, from - len), from);
+        const after = doc.sliceString(to, Math.min(doc.length, to + len));
+        if (before === marker && after === marker) {
+          return {
+            changes: [
+              { from: from - len, to: from },
+              { from: to, to: to + len },
+            ],
+            range: EditorSelection.cursor(from - len),
+          };
+        }
+        return {
+          changes: { from, insert: marker + marker },
+          range: EditorSelection.cursor(from + len),
+        };
+      }
+
+      // Pull any asterisks just outside the selection in, so selecting the
+      // word and selecting the word with its markers behave the same.
+      let start = from;
+      while (start > 0 && start > from - 3 && doc.sliceString(start - 1, start) === "*") start--;
+      let end = to;
+      while (end < doc.length && end < to + 3 && doc.sliceString(end, end + 1) === "*") end++;
+
+      const text = doc.sliceString(start, end);
+      const run = asteriskRun(text);
+      const wrapped = len === 1 ? run % 2 === 1 : run >= 2;
+
+      if (wrapped) {
+        return {
+          changes: { from: start, to: end, insert: text.slice(len, text.length - len) },
+          range: EditorSelection.range(start, end - 2 * len),
+        };
+      }
+      return {
+        changes: [
+          { from: start, insert: marker },
+          { from: end, insert: marker },
+        ],
+        range: EditorSelection.range(start + len, end + len),
+      };
+    });
+    view.dispatch(changes, { scrollIntoView: true, userEvent: "input" });
+    return true;
+  };
+}
+
+const inlineStyleKeymap = [
+  { key: "Mod-b", run: toggleInline("**") },
+  { key: "Mod-i", run: toggleInline("*") },
+];
+
 const themeCompartment = new Compartment();
 
 function themeFor(dark) {
@@ -28759,7 +28837,7 @@ function init(parent, doc, onDocChanged, dark) {
         markdown(),
         syntaxHighlighting(mdHighlight),
         search({ top: true }),
-        keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+        keymap.of([...inlineStyleKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
         themeCompartment.of(themeFor(dark)),
         EditorView.updateListener.of((u) => {
           if (u.docChanged && typeof onDocChanged === "function") onDocChanged();
