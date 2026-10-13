@@ -13,6 +13,42 @@ talkie-shared = { path = "shared" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Clippy, strict. Every crate opts in with `[lints] workspace = true`; clippy.toml
+# relaxes the panic lints inside tests. The point is guardrails for code nobody
+# reviewed line by line — agents' included — so the bar is "deny", and the only
+# way past a lint is `#[expect(lint, reason = "…")]` naming the invariant that
+# makes the code correct (see AGENTS.md). Never satisfy one with a made-up
+# default such as `.unwrap_or(0)`: a loud panic beats a quietly wrong talkie.md.
+[workspace.lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+
+# Don't panic.
+unwrap_used = "deny"
+get_unwrap = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+panic = "deny"
+panic_in_result_fn = "deny"
+unwrap_in_result = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+unchecked_time_subtraction = "deny"
+exit = "deny"
+
+# Don't fail silently.
+let_underscore_must_use = "deny"
+map_err_ignore = "deny"
+
+# Don't deadlock, don't hide unsafe.
+await_holding_lock = "deny"
+undocumented_unsafe_blocks = "deny"
+
+# Don't leave debugging behind, and don't switch a lint off without saying why.
+dbg_macro = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+
 # Read the optimization guideline for more details:
 # https://tauri.app/concept/size/#cargo-configuration
 # Profiles must live in the workspace root to apply.
@@ -22,3 +58,7 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+# Overflow panics in release as it does in debug. With `panic = "abort"` and
+# atomic writes that is a crash in debug.log, never a wrapped offset that
+# writes text into the wrong place in talkie.md.
+overflow-checks = true

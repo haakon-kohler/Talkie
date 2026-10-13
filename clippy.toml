@@ -1,0 +1,7 @@
+# Tests are where a panic belongs: a failed assumption should fail the test
+# loudly. The matching lints are denied everywhere else (see Cargo.toml).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests = true
