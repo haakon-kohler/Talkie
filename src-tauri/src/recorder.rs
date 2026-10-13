@@ -171,9 +171,7 @@ impl Recorder {
                 VAD_HANGOVER_FRAMES,
                 VAD_ONSET_FRAMES,
             );
-            let recorder = AudioRecorder::new()
-                .map_err(|e| anyhow!("could not create the recorder: {e}"))?
-                .with_vad(Box::new(smoothed));
+            let recorder = AudioRecorder::new().with_vad(Box::new(smoothed));
             *guard = Some(recorder);
         }
 

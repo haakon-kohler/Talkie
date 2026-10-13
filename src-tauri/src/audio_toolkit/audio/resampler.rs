@@ -14,6 +14,12 @@ pub struct FrameResampler {
 
 impl FrameResampler {
     pub fn new(in_hz: usize, out_hz: usize, frame_dur: Duration) -> Self {
+        #[expect(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a sample rate times a frame duration is a few hundred samples, positive"
+        )]
         let frame_samples = ((out_hz as f64 * frame_dur.as_secs_f64()).round()) as usize;
         assert!(frame_samples > 0, "frame duration too short");
 
@@ -35,28 +41,24 @@ impl FrameResampler {
     }
 
     pub fn push(&mut self, mut src: &[f32], mut emit: impl FnMut(&[f32])) {
-        if self.resampler.is_none() {
-            self.emit_frames(src, &mut emit);
+        let Some(resampler) = self.resampler.as_mut() else {
+            emit_frames(&mut self.pending, self.frame_samples, src, &mut emit);
             return;
-        }
+        };
 
         while !src.is_empty() {
             let space = self.chunk_in - self.in_buf.len();
-            let take = space.min(src.len());
-            self.in_buf.extend_from_slice(&src[..take]);
-            src = &src[take..];
+            // At most what is left, so the split is always in bounds.
+            let (head, rest) = src.split_at(space.min(src.len()));
+            self.in_buf.extend_from_slice(head);
+            src = rest;
 
             if self.in_buf.len() == self.chunk_in {
-                // let start = std::time::Instant::now();
-                if let Ok(out) = self
-                    .resampler
-                    .as_mut()
-                    .unwrap()
-                    .process(&[&self.in_buf[..]], None)
-                {
-                    // let duration = start.elapsed();
-                    // log::debug!("Resampler took: {:?}", duration);
-                    self.emit_frames(&out[0], &mut emit);
+                if let Ok(out) = resampler.process(&[self.in_buf.as_slice()], None) {
+                    // One channel in, one channel out.
+                    if let Some(mono) = out.first() {
+                        emit_frames(&mut self.pending, self.frame_samples, mono, &mut emit);
+                    }
                 }
                 self.in_buf.clear();
             }
@@ -69,8 +71,10 @@ impl FrameResampler {
             if !self.in_buf.is_empty() {
                 // Pad with zeros to reach chunk size
                 self.in_buf.resize(self.chunk_in, 0.0);
-                if let Ok(out) = resampler.process(&[&self.in_buf[..]], None) {
-                    self.emit_frames(&out[0], &mut emit);
+                if let Ok(out) = resampler.process(&[self.in_buf.as_slice()], None) {
+                    if let Some(mono) = out.first() {
+                        emit_frames(&mut self.pending, self.frame_samples, mono, &mut emit);
+                    }
                 }
                 // Drop the consumed input: a full in_buf would satisfy the
                 // next push()'s chunk check immediately, re-processing this
@@ -98,18 +102,29 @@ impl FrameResampler {
             resampler.reset();
         }
     }
+}
 
-    fn emit_frames(&mut self, mut data: &[f32], emit: &mut impl FnMut(&[f32])) {
-        while !data.is_empty() {
-            let space = self.frame_samples - self.pending.len();
-            let take = space.min(data.len());
-            self.pending.extend_from_slice(&data[..take]);
-            data = &data[take..];
+/// Cut `data` into frames of `frame_samples`, carrying a partial frame over in
+/// `pending` until the next call fills it.
+///
+/// A function over the two fields rather than a method, so `push` can call it
+/// while it holds the resampler mutably.
+fn emit_frames(
+    pending: &mut Vec<f32>,
+    frame_samples: usize,
+    mut data: &[f32],
+    emit: &mut impl FnMut(&[f32]),
+) {
+    while !data.is_empty() {
+        let space = frame_samples - pending.len();
+        // At most what is left, so the split is always in bounds.
+        let (head, rest) = data.split_at(space.min(data.len()));
+        pending.extend_from_slice(head);
+        data = rest;
 
-            if self.pending.len() == self.frame_samples {
-                emit(&self.pending);
-                self.pending.clear();
-            }
+        if pending.len() == frame_samples {
+            emit(pending);
+            pending.clear();
         }
     }
 }
@@ -119,6 +134,12 @@ mod tests {
     use super::*;
 
     /// Generate a 1kHz sine wave at the given sample rate and duration.
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "test signals are short, positive and nowhere near f64's limits"
+    )]
     fn sine_wave(sample_rate: usize, freq: f64, duration_secs: f64) -> Vec<f32> {
         let n = (sample_rate as f64 * duration_secs) as usize;
         (0..n)
@@ -151,8 +172,7 @@ mod tests {
         let max_abs = out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
         assert!(
             max_abs < 0.01,
-            "After reset, silence input should produce near-silence output, got max_abs={}",
-            max_abs
+            "After reset, silence input should produce near-silence output, got max_abs={max_abs}"
         );
     }
 
@@ -177,8 +197,7 @@ mod tests {
         let max_abs = out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
         assert!(
             max_abs < 0.01,
-            "FFT overlap should not leak after reset; got max_abs={} (expected near-zero)",
-            max_abs
+            "FFT overlap should not leak after reset; got max_abs={max_abs} (expected near-zero)"
         );
     }
 
@@ -187,7 +206,7 @@ mod tests {
         let mut r = FrameResampler::new(48000, 16000, Duration::from_millis(30));
 
         // Recording 1: ascending ramp (distinctive pattern)
-        let ramp: Vec<f32> = (0..48000).map(|i| i as f32 / 48000.0).collect(); // 1 second
+        let ramp: Vec<f32> = (0..48000u16).map(|i| f32::from(i) / 48000.0).collect(); // 1 second
         let out1 = collect_output(&mut r, &ramp);
         r.finish(|_| {});
         assert!(!out1.is_empty(), "Recording 1 should produce output");
@@ -236,8 +255,7 @@ mod tests {
             let max_abs = out.iter().take(480).map(|s| s.abs()).fold(0.0f32, f32::max);
             assert!(
                 max_abs < 0.001,
-                "Passthrough mode: pending buffer should be cleared after reset, got max_abs={}",
-                max_abs
+                "Passthrough mode: pending buffer should be cleared after reset, got max_abs={max_abs}"
             );
         }
     }
@@ -257,7 +275,7 @@ mod tests {
         // 480-sample frame boundary, and a stale frame is emitted here.
         let mut emitted = 0usize;
         rs.push(&[0.25f32; RESAMPLER_CHUNK_SIZE], |frame| {
-            emitted += frame.len()
+            emitted += frame.len();
         });
         assert_eq!(
             emitted, 0,

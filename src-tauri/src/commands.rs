@@ -147,14 +147,10 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn request_microphone() -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let mut recorder = crate::audio_toolkit::AudioRecorder::new().map_err(|e| e.to_string())?;
+        let mut recorder = crate::audio_toolkit::AudioRecorder::new();
         match recorder.open(None) {
             Ok(()) => {
-                // The stream was only ever opened to trip the prompt; the
-                // answer is in, whatever closing it says.
-                if let Err(e) = recorder.close() {
-                    log::warn!("talkie: could not close the microphone probe: {e}");
-                }
+                recorder.close();
                 Ok(true)
             }
             Err(e) => {
