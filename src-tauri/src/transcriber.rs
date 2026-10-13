@@ -18,7 +18,7 @@ use crate::audio_toolkit::constants::MAX_CAPTURE_SAMPLES;
 
 /// How long the model stays resident after its last use. Deliberately not a
 /// setting.
-const IDLE_UNLOAD: Duration = Duration::from_secs(5 * 60);
+const IDLE_UNLOAD: Duration = Duration::from_mins(5);
 
 /// Owns the loaded engine. One capture runs at a time, so a mutex is the whole
 /// concurrency story.
@@ -39,8 +39,10 @@ impl Transcriber {
 
     /// Transcribe 16 kHz mono samples. Blocking and CPU-bound — call it off the
     /// UI thread.
-    pub fn transcribe(&self, model_dir: &Path, samples: Vec<f32>) -> Result<String> {
-        assert!(!samples.is_empty(), "transcribe called with no audio");
+    pub fn transcribe(&self, model_dir: &Path, samples: &[f32]) -> Result<String> {
+        // The recorder drops captures too short to be worth a model run, so
+        // this is a bug upstream; it fails the one capture, not the app.
+        anyhow::ensure!(!samples.is_empty(), "transcribe called with no audio");
         debug_assert!(
             samples.len() <= MAX_CAPTURE_SAMPLES,
             "the recorder must cap a capture before it reaches the model"
@@ -53,15 +55,18 @@ impl Transcriber {
         let mut guard = self
             .engine
             .lock()
-            .map_err(|_| anyhow!("transcriber lock poisoned"))?;
+            .map_err(|e| anyhow!("transcriber lock poisoned: {e}"))?;
 
-        if guard.is_none() {
-            let model = ParakeetModel::load(model_dir, &Quantization::Int8)
-                .map_err(|e| anyhow!("could not load the speech model from {model_dir:?}: {e}"))?;
-            *guard = Some(model);
-        }
-
-        let model = guard.as_mut().expect("model loaded above");
+        let model = match guard.take() {
+            Some(model) => model,
+            None => ParakeetModel::load(model_dir, &Quantization::Int8).map_err(|e| {
+                anyhow!(
+                    "could not load the speech model from {}: {e}",
+                    model_dir.display()
+                )
+            })?,
+        };
+        let model = guard.insert(model);
         // Segment granularity is the cheapest option that still returns text;
         // Talkie never renders timestamps from the model, it writes its own.
         let params = ParakeetParams {
@@ -69,7 +74,7 @@ impl Transcriber {
             ..Default::default()
         };
         let result = model
-            .transcribe_with(&samples, &params)
+            .transcribe_with(samples, &params)
             .map_err(|e| anyhow!("transcription failed: {e}"))?;
 
         Ok(result.text.trim().to_string())
@@ -100,5 +105,25 @@ impl Transcriber {
 impl Default for Transcriber {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An empty capture is a bug upstream, and it fails that one capture: no
+    /// panic, and no attempt to load a model to transcribe nothing.
+    #[test]
+    fn no_audio_is_an_error_not_a_panic() {
+        let transcriber = Transcriber::new();
+        let error = transcriber
+            .transcribe(Path::new("/nonexistent/model"), &[])
+            .expect_err("nothing to transcribe");
+        assert_eq!(error.to_string(), "transcribe called with no audio");
+        assert!(
+            transcriber.engine.lock().unwrap().is_none(),
+            "no model was loaded"
+        );
     }
 }

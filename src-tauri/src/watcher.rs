@@ -37,7 +37,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use talkie_shared::events;
 use tauri::{AppHandle, Emitter, Manager};
@@ -142,38 +142,45 @@ impl NoteWatcher {
     pub(crate) fn watch(&self, path: &Path, on_change: impl Fn() + Send + 'static) -> Result<()> {
         let directory = path
             .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         // The folder need not exist yet — the first capture creates it — but
         // there is nothing to watch until it does.
-        std::fs::create_dir_all(&directory)
-            .with_context(|| format!("could not create the notes folder {directory:?}"))?;
+        std::fs::create_dir_all(&directory).with_context(|| {
+            format!("could not create the notes folder {}", directory.display())
+        })?;
 
         let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
         let mut watcher = notify::recommended_watcher(move |event| {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the thread only stops listening when this watch is being replaced"
+            )]
             let _ = tx.send(event);
         })
         .context("could not create a file watcher")?;
         watcher
             .watch(&directory, RecursiveMode::NonRecursive)
-            .with_context(|| format!("could not watch {directory:?}"))?;
+            .with_context(|| format!("could not watch {}", directory.display()))?;
 
         // Retire the previous thread before this one can report anything: from
         // here on, only this generation records what it finds.
         let generation = {
-            let mut seen = self.seen.lock().expect("watcher mutex poisoned");
+            let mut seen = self
+                .seen
+                .lock()
+                .map_err(|e| anyhow!("watcher mutex poisoned: {e}"))?;
             seen.generation += 1;
             seen.generation
         };
         let seen = Arc::clone(&self.seen);
-        let watched = path.to_path_buf();
+        let note_path = path.to_path_buf();
         std::thread::Builder::new()
             .name("talkie-note-watcher".into())
             .spawn(move || {
                 // Ends when the watcher is dropped and the sender goes with it,
                 // which is how re-arming retires the previous thread.
                 while let Ok(first) = rx.recv() {
-                    if !concerns(&first, &watched) {
+                    if !concerns(&first, &note_path) {
                         continue;
                     }
                     // Drain the rest of the flurry before reading: keep
@@ -183,14 +190,17 @@ impl NoteWatcher {
                     while rounds < MAX_SETTLE_ROUNDS && rx.recv_timeout(SETTLE).is_ok() {
                         rounds += 1;
                     }
-                    if noticed(&seen, generation, &watched) {
+                    if noticed(&seen, generation, &note_path) {
                         on_change();
                     }
                 }
             })
             .context("could not start the note watcher thread")?;
 
-        *self.watcher.lock().expect("watcher mutex poisoned") = Some(watcher);
+        *self
+            .watcher
+            .lock()
+            .map_err(|e| anyhow!("watcher mutex poisoned: {e}"))? = Some(watcher);
         Ok(())
     }
 }
@@ -230,7 +240,7 @@ pub fn init(app: &AppHandle) {
 pub fn arm(app: &AppHandle) -> Result<()> {
     let path = {
         let settings = app.state::<SettingsState>();
-        let guard = settings.0.lock().expect("settings mutex poisoned");
+        let guard = settings.lock().map_err(anyhow::Error::msg)?;
         note::resolve(&guard.note_path)
     };
 
@@ -301,7 +311,7 @@ mod tests {
     /// real path and the macOS temporary folder sits behind a symlink.
     fn two_notes(name: &str) -> (PathBuf, PathBuf) {
         let dir = std::env::temp_dir().join(format!("talkie-watcher-test-{name}"));
-        let _ = std::fs::remove_dir_all(&dir);
+        crate::test_support::remove_dir_if_present(&dir);
         std::fs::create_dir_all(dir.join("a")).unwrap();
         std::fs::create_dir_all(dir.join("b")).unwrap();
         let dir = dir.canonicalize().unwrap();
@@ -312,6 +322,10 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         watcher
             .watch(path, move || {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "a report after the test has stopped listening is of no interest"
+                )]
                 let _ = tx.send(());
             })
             .expect("watch");

@@ -13,7 +13,7 @@
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
@@ -81,10 +81,10 @@ pub fn init(data_dir: &Path) {
             .copied()
             .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
             .unwrap_or("panic without a message");
-        let location = info
-            .location()
-            .map(|l| format!("{}:{}", l.file(), l.line()))
-            .unwrap_or_else(|| "unknown location".into());
+        let location = info.location().map_or_else(
+            || "unknown location".into(),
+            |l| format!("{}:{}", l.file(), l.line()),
+        );
         record(Severity::Fatal, &format!("{payload} at {location}"));
         default_hook(info);
     }));
@@ -142,10 +142,7 @@ fn record(severity: Severity, message: &str) {
 
     // The panic hook records with whatever state the mutex is in; a poisoned
     // lock still holds a readable ring.
-    let mut ring = journal
-        .ring
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut ring = journal.ring.lock().unwrap_or_else(PoisonError::into_inner);
 
     let repeated = ring.back().is_some_and(|last| strip(last) == strip(&line));
     if repeated {
@@ -183,6 +180,10 @@ fn split_count(line: &str) -> (&str, u32) {
 }
 
 /// Write-then-rename: a crash mid-write leaves the previous file, not a torn one.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "the journal cannot report its own failure: a warning here would recurse"
+)]
 fn write(path: &Path, ring: &VecDeque<String>) {
     let mut text = String::new();
     for line in ring {
@@ -242,19 +243,22 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("talkie-journal-{}", std::process::id()));
         fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join(FILE);
-        let text: String = (0..LINES + 5).map(|i| format!("line {i}\n")).collect();
+        let text = (0..LINES + 5)
+            .map(|i| format!("line {i}\n"))
+            .collect::<Vec<_>>()
+            .concat();
         fs::write(&path, text).expect("seed");
 
         let ring = load(&path);
         assert_eq!(ring.len(), LINES);
         assert_eq!(ring.front().map(String::as_str), Some("line 5"));
         assert_eq!(load(&dir.join("missing.log")).len(), 0);
-        let _ = fs::remove_dir_all(dir);
+        crate::test_support::remove_dir_if_present(&dir);
     }
 
     #[test]
     fn the_flag_is_recognised_after_the_executable() {
-        let argv = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let argv = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
         assert!(flagged(&argv(&["talkie", "--debug-log"])));
         assert!(!flagged(&argv(&["talkie"])));
         assert!(

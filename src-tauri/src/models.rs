@@ -62,8 +62,14 @@ pub fn status(app: &AppHandle) -> ModelStatus {
 }
 
 fn emit(app: &AppHandle, progress: ModelProgress) {
-    let _ = app.emit(events::MODEL_PROGRESS, progress);
+    if let Err(e) = app.emit(events::MODEL_PROGRESS, progress) {
+        log::warn!("talkie: could not report the model download's progress: {e}");
+    }
 }
+
+/// One progress event per ~2 MB: enough for a smooth bar, few enough that the
+/// webview is not woken thousands of times during a 456 MB download.
+const PROGRESS_STEP: u64 = 2 * 1024 * 1024;
 
 /// Download, verify, and unpack the model, emitting `MODEL_PROGRESS` as it goes.
 /// Returns early — and cheaply — if the model is already on disk.
@@ -128,9 +134,6 @@ async fn download_inner(app: &AppHandle) -> Result<()> {
     let mut file = fs::File::create(&archive_path)?;
     let mut stream = response.bytes_stream();
 
-    // One event per ~2 MB: enough for a smooth bar, few enough that the webview
-    // is not woken thousands of times during a 456 MB download.
-    const PROGRESS_STEP: u64 = 2 * 1024 * 1024;
     let mut next_report = PROGRESS_STEP;
 
     while let Some(chunk) = stream.next().await {
@@ -158,7 +161,7 @@ async fn download_inner(app: &AppHandle) -> Result<()> {
 
     let digest = format!("{:x}", hasher.finalize());
     if digest != MODEL_SHA256 {
-        let _ = fs::remove_file(&archive_path);
+        remove_leftover(&archive_path);
         return Err(anyhow!(
             "the downloaded model did not match its checksum; nothing was installed"
         ));
@@ -183,7 +186,7 @@ async fn download_inner(app: &AppHandle) -> Result<()> {
         .await
         .context("the unpacking task panicked")??;
 
-    let _ = fs::remove_file(&archive_path);
+    remove_leftover(&archive_path);
 
     if status(app) != ModelStatus::Ready {
         return Err(anyhow!(
@@ -237,7 +240,18 @@ fn extract(archive: &Path, dir: &Path) -> Result<()> {
     );
 
     if staging.exists() {
-        let _ = fs::remove_dir_all(&staging);
+        if let Err(e) = fs::remove_dir_all(&staging) {
+            log::warn!("talkie: could not clear {}: {e}", staging.display());
+        }
     }
     Ok(())
+}
+
+/// Delete the downloaded archive once it is no longer wanted. It is hundreds of
+/// megabytes, so failing to is worth a line in the journal, never a failed
+/// install.
+fn remove_leftover(archive: &Path) {
+    if let Err(e) = fs::remove_file(archive) {
+        log::warn!("talkie: could not delete {}: {e}", archive.display());
+    }
 }

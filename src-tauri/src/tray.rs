@@ -19,8 +19,8 @@ const ID_RECORD: &str = "record";
 const ID_SETTINGS: &str = "settings";
 const ID_QUIT: &str = "quit";
 
-pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    assert!(
+pub fn build<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<()> {
+    anyhow::ensure!(
         app.tray_by_id(TRAY_ID).is_none(),
         "the tray was built twice"
     );
@@ -99,7 +99,14 @@ pub fn set_state<R: Runtime>(app: &AppHandle<R>, state: RecorderState) {
         RecorderState::Recording => "Talkie — recording",
         RecorderState::Transcribing => "Talkie — transcribing",
     };
-    let _ = TrayIcon::set_tooltip(&tray, Some(tooltip));
-    let _ = tray.set_icon(Some(icon(state)));
-    let _ = tray.set_icon_as_template(true);
+    let updates = [
+        TrayIcon::set_tooltip(&tray, Some(tooltip)),
+        tray.set_icon(Some(icon(state))),
+        tray.set_icon_as_template(true),
+    ];
+    for result in updates {
+        if let Err(e) = result {
+            log::warn!("talkie: could not show {state:?} in the menu bar: {e}");
+        }
+    }
 }

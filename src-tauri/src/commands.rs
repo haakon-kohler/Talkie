@@ -16,6 +16,10 @@ use crate::watcher::NoteWatcher;
 use crate::{login_item, models, note, panel, shortcut, watcher, windows};
 
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn get_settings(state: State<'_, SettingsState>) -> Settings {
     let mut guard = state.0.lock().expect("settings mutex poisoned");
     // The login item can be switched off in System Settings behind Talkie's
@@ -25,6 +29,10 @@ pub fn get_settings(state: State<'_, SettingsState>) -> Settings {
 }
 
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn set_settings(
     app: AppHandle,
     state: State<'_, SettingsState>,
@@ -43,7 +51,7 @@ pub fn set_settings(
     login_item::apply(settings.launch_at_login).map_err(|e| format!("{e:#}"))?;
 
     let (shortcut_changed, note_path_changed) = {
-        let mut guard = state.0.lock().expect("settings mutex poisoned");
+        let mut guard = state.lock()?;
         let changed = (
             guard.shortcut != settings.shortcut,
             guard.note_path != settings.note_path,
@@ -77,30 +85,49 @@ pub fn set_settings(
 
 /// Finish first run: remember it, close the onboarding window, open the editor.
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn complete_onboarding(app: AppHandle, state: State<'_, SettingsState>) -> Result<(), String> {
     let settings = {
-        let mut guard = state.0.lock().expect("settings mutex poisoned");
+        let mut guard = state.lock()?;
         guard.onboarding_complete = true;
         guard.clone()
     };
     settings::save(&app, &settings)?;
-    let _ = app.emit(events::SETTINGS_CHANGED, &settings);
+    // Only the settings window listens, and it reads afresh when it opens.
+    if let Err(e) = app.emit(events::SETTINGS_CHANGED, &settings) {
+        log::warn!("talkie: could not announce finished onboarding: {e}");
+    }
 
     windows::hide(&app, WindowLabel::Onboarding)?;
     windows::show(&app, WindowLabel::Editor)
 }
 
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn show_window(app: AppHandle, label: WindowLabel) -> Result<(), String> {
     windows::show(&app, label)
 }
 
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn hide_window(app: AppHandle, label: WindowLabel) -> Result<(), String> {
     windows::hide(&app, label)
 }
 
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn get_model_status(app: AppHandle) -> ModelStatus {
     models::status(&app)
 }
@@ -123,7 +150,11 @@ pub async fn request_microphone() -> Result<bool, String> {
         let mut recorder = crate::audio_toolkit::AudioRecorder::new().map_err(|e| e.to_string())?;
         match recorder.open(None) {
             Ok(()) => {
-                let _ = recorder.close();
+                // The stream was only ever opened to trip the prompt; the
+                // answer is in, whatever closing it says.
+                if let Err(e) = recorder.close() {
+                    log::warn!("talkie: could not close the microphone probe: {e}");
+                }
                 Ok(true)
             }
             Err(e) => {
@@ -143,11 +174,19 @@ pub async fn request_microphone() -> Result<bool, String> {
 /// Start or stop a capture — the same entry point the shortcut uses, so the UI
 /// and the tray can never drift into a different state machine.
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn toggle_recording(recorder: State<'_, Arc<Recorder>>) {
     recorder.toggle();
 }
 
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn get_recorder_state(recorder: State<'_, Arc<Recorder>>) -> RecorderState {
     recorder.state()
 }
@@ -159,9 +198,13 @@ pub fn get_recorder_state(recorder: State<'_, Arc<Recorder>>) -> RecorderState {
 /// tells the watcher what Talkie now believes is on disk, so the events this
 /// read may have raced with do not come back as a phantom external change.
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn read_note(app: AppHandle, state: State<'_, SettingsState>) -> Result<Note, String> {
     let path = {
-        let guard = state.0.lock().expect("settings mutex poisoned");
+        let guard = state.lock()?;
         note::resolve(&guard.note_path)
     };
     let text = load_note(&path, &app.state::<NoteWatcher>())?;
@@ -205,6 +248,10 @@ fn load_note(path: &Path, watcher: &NoteWatcher) -> Result<String, String> {
 /// the old file were waiting to be saved. It is only ever the file the editor
 /// last read or saved; a save to any other file has no base and is refused.
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn write_note(app: AppHandle, path: String, text: String) -> Result<String, String> {
     save_note(&PathBuf::from(path), &text, &app.state::<NoteWatcher>())
 }
@@ -259,12 +306,20 @@ fn save_note(path: &Path, text: &str, watcher: &NoteWatcher) -> Result<String, S
 /// shortcut they already have without starting a capture, and raw key events
 /// arrive in the UI as `SHORTCUT_CAPTURE`.
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn start_shortcut_recording(state: State<'_, ShortcutState>) -> Result<(), String> {
     state.start_recording()
 }
 
 /// Leave recording mode and re-bind whatever settings now hold.
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn stop_shortcut_recording(state: State<'_, ShortcutState>) -> Result<(), String> {
     state.stop_recording()
 }
@@ -287,6 +342,10 @@ pub fn open_accessibility_settings() -> Result<(), String> {
 /// this is all it takes to come back from a start-up where Accessibility had not
 /// been granted yet — no restart, no reinstall.
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a Tauri command owns its arguments"
+)]
 pub fn retry_shortcut(app: AppHandle) -> Result<(), String> {
     shortcut::apply(&app).map_err(|e| format!("{e:#}"))
 }
@@ -297,13 +356,15 @@ pub fn retry_shortcut(app: AppHandle) -> Result<(), String> {
 /// Returns the path the way the settings form should show it, or `None` for a
 /// cancelled panel. Nothing is persisted here: the form puts the answer in the
 /// field, and Save runs it through the same validation as a typed path.
+///
+/// The settings come from `app` rather than a `State` argument: an async
+/// command that borrows one gets a compile-time check from `#[tauri::command]`
+/// written with `unreachable!()`, which the lints refuse.
 #[tauri::command]
-pub async fn pick_note_path(
-    app: AppHandle,
-    state: State<'_, SettingsState>,
-) -> Result<Option<String>, String> {
+pub async fn pick_note_path(app: AppHandle) -> Result<Option<String>, String> {
     let current = {
-        let guard = state.0.lock().expect("settings mutex poisoned");
+        let settings = app.state::<SettingsState>();
+        let guard = settings.lock()?;
         note::resolve(&guard.note_path)
     };
     let chosen = panel::choose_note_path(&app, &current)
@@ -376,7 +437,7 @@ mod tests {
     /// file exists yet.
     fn two_notes(name: &str) -> (PathBuf, PathBuf) {
         let dir = std::env::temp_dir().join(format!("talkie-commands-test-{name}"));
-        let _ = fs::remove_dir_all(&dir);
+        crate::test_support::remove_dir_if_present(&dir);
         fs::create_dir_all(dir.join("a")).unwrap();
         fs::create_dir_all(dir.join("b")).unwrap();
         // Canonical, because FSEvents reports the real path and the macOS
@@ -391,6 +452,10 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         watcher
             .watch(path, move || {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "a report after the test has stopped listening is of no interest"
+                )]
                 let _ = tx.send(());
             })
             .expect("watch");
@@ -458,7 +523,7 @@ mod tests {
         reports
             .recv_timeout(PATIENCE)
             .expect("the watcher never reported the capture");
-        let _ = save_note(&b, &stale, &watcher);
+        assert!(save_note(&b, &stale, &watcher).is_err());
 
         assert_eq!(contents(&b), after_capture, "B was overwritten");
         assert_eq!(contents(&a), A);
@@ -585,7 +650,7 @@ mod tests {
         note::prepend(&a, "Spoken into A").expect("capture");
         let after_capture = contents(&a);
         reports.recv_timeout(PATIENCE).expect("no report from A");
-        let _ = save_note(&a, &stale, &watcher);
+        assert!(save_note(&a, &stale, &watcher).is_err());
 
         assert_eq!(contents(&a), after_capture, "A was overwritten");
     }

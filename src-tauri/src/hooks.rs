@@ -189,11 +189,19 @@ fn run(hook: &Path, note: &Path, input: &str, timeout: Option<Duration>) -> Resu
     let (out_tx, out_rx) = mpsc::channel();
     thread::spawn(move || {
         let mut s = String::new();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "past the deadline nobody is waiting for the output"
+        )]
         let _ = out_tx.send(stdout.read_to_string(&mut s).map(|_| s));
     });
     let (err_tx, err_rx) = mpsc::channel();
     thread::spawn(move || {
         let mut s = String::new();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "past the deadline nobody is waiting for the output"
+        )]
         let _ = err_tx.send(stderr.read_to_string(&mut s).map(|_| s));
     });
 
@@ -220,8 +228,14 @@ fn wait(child: &mut Child, deadline: Option<Instant>) -> Result<ExitStatus> {
             return Ok(status);
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            // The timeout is the error; a hook that will not die or be reaped
+            // is worth a line of its own, since it may still be running.
+            if let Err(e) = child.kill() {
+                log::warn!("talkie: could not kill a hook past its deadline: {e}");
+            }
+            if let Err(e) = child.wait() {
+                log::warn!("talkie: could not reap a hook past its deadline: {e}");
+            }
             return Err(anyhow!("still running at the deadline; killed"));
         }
         thread::sleep(Duration::from_millis(20));
@@ -259,6 +273,10 @@ mod tests {
 
     impl Drop for Script {
         fn drop(&mut self) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a leftover temp script is harmless; panicking in drop would hide the test's own failure"
+            )]
             let _ = fs::remove_file(&self.0);
         }
     }

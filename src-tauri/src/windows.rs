@@ -14,7 +14,13 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, label: WindowLabel) -> Result<(), St
         .ok_or_else(|| format!("no window labelled `{}`", label.as_str()))?;
 
     #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    {
+        // Without Regular the window shows but cannot take focus; showing it
+        // anyway beats refusing to.
+        if let Err(e) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
+            log::warn!("talkie: could not become a regular app: {e}");
+        }
+    }
 
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())
@@ -37,7 +43,9 @@ pub fn sync_activation_policy<R: Runtime>(app: &AppHandle<R>) {
             .values()
             .any(|w| w.is_visible().unwrap_or(false));
         if !any_visible {
-            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            if let Err(e) = app.set_activation_policy(tauri::ActivationPolicy::Accessory) {
+                log::warn!("talkie: could not go back to the menu bar: {e}");
+            }
         }
     }
     #[cfg(not(target_os = "macos"))]

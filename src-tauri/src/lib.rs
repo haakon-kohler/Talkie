@@ -16,6 +16,8 @@ mod recorder;
 mod settings;
 mod shortcut;
 mod sounds;
+#[cfg(test)]
+mod test_support;
 mod transcriber;
 mod tray;
 mod watcher;
@@ -27,6 +29,12 @@ use settings::SettingsState;
 use talkie_shared::WindowLabel;
 use tauri::{AppHandle, Manager, WindowEvent};
 
+/// Start Talkie and run until it quits.
+///
+/// # Panics
+///
+/// When Tauri cannot start: there is no app yet to report the failure through,
+/// and the journal records the panic.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -106,7 +114,11 @@ pub fn run() {
 
             // Menu-bar app: no Dock icon until a window is actually shown.
             #[cfg(target_os = "macos")]
-            let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            {
+                if let Err(e) = handle.set_activation_policy(tauri::ActivationPolicy::Accessory) {
+                    log::warn!("talkie: could not hide the Dock icon: {e}");
+                }
+            }
 
             if first_run {
                 if let Err(e) = windows::show(&handle, WindowLabel::Onboarding) {
@@ -121,7 +133,9 @@ pub fn run() {
             // keeps living in the menu bar.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                if let Err(e) = window.hide() {
+                    log::warn!("talkie: could not hide `{}`: {e}", window.label());
+                }
                 windows::sync_activation_policy(window.app_handle());
             }
         })
@@ -134,6 +148,10 @@ pub fn run() {
 /// The loser has already exited; the user clicked Talkie and wants it to
 /// appear, so show whichever window they should be looking at. No dialog:
 /// an "already running" alert would only explain something they never saw.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the single-instance plugin hands its callback owned arguments"
+)]
 fn second_launch(app: &AppHandle, argv: Vec<String>, _cwd: String) {
     assert!(
         !argv.is_empty(),
