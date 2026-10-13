@@ -84,6 +84,19 @@ pub fn SettingsPage() -> impl IntoView {
                 <label class="toggle">
                     <input
                         type="checkbox"
+                        prop:checked=move || settings.get().is_none_or(|s| s.double_tap_notepad)
+                        on:change=move |ev| {
+                            let value = event_target_checked(&ev);
+                            settings.update(|s| { if let Some(s) = s { s.double_tap_notepad = value; } });
+                        }
+                    />
+                    // COPY: settings.double_tap_notepad.label — placeholder
+                    <span>"Double-Tap Shortcut to Open Notepad"</span>
+                </label>
+
+                <label class="toggle">
+                    <input
+                        type="checkbox"
                         prop:checked=move || settings.get().is_none_or(|s| s.play_sounds)
                         on:change=move |ev| {
                             let value = event_target_checked(&ev);

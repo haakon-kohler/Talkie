@@ -191,6 +191,16 @@ impl Recorder {
         let ready = recorder
             .start()
             .map_err(|e| anyhow!("could not start recording: {e}"))?;
+
+        // A stop or cancel that took the audio lock before this thread did
+        // found nothing running to stop. The state has already moved on, so
+        // nobody else will end the capture that just began: end it here.
+        if self.state() != RecorderState::Recording {
+            if let Err(e) = recorder.stop() {
+                log::warn!("talkie: could not stop a capture that was already over: {e}");
+            }
+            return Ok(());
+        }
         drop(guard);
 
         // Chime only once samples are actually flowing, so the sound never
@@ -215,6 +225,37 @@ impl Recorder {
             sounds::play_start();
         }
         Ok(())
+    }
+
+    /// Abandon a capture: nothing is transcribed, no hook runs, no chime
+    /// plays. Returns whether there was a capture to abandon.
+    ///
+    /// This is the double-tap's first half being taken back, and a short
+    /// push-to-talk tap that turned out not to be one.
+    pub fn cancel(self: &Arc<Self>) -> bool {
+        if !self.transition(RecorderState::Recording, RecorderState::Idle) {
+            return false;
+        }
+        // Off the caller's thread: the worker may still hold the audio lock
+        // while a slow microphone opens, and the caller is the shortcut engine.
+        let this = Arc::clone(self);
+        std::thread::spawn(move || {
+            let Ok(guard) = this.audio.lock() else {
+                return;
+            };
+            // A new capture may have begun while this thread waited for the
+            // lock. Its own start resets the consumer, so stopping it here
+            // would end the wrong capture.
+            if this.state() != RecorderState::Idle {
+                return;
+            }
+            if let Some(recorder) = guard.as_ref() {
+                if let Err(e) = recorder.stop() {
+                    log::warn!("talkie: could not stop a cancelled capture: {e}");
+                }
+            }
+        });
+        true
     }
 
     /// Stop the consumer and throw away whatever it collected.

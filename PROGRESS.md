@@ -260,13 +260,12 @@ every file written in the old order is one more file with a seam in it.
       top heading already names goes directly under it, newest paragraph first,
       a blank line between paragraphs (`document::capture`).
 
-- [ ] **A way to open the notepad from the keyboard — mechanism undecided.**
-      Double-tapping the capture shortcut is *not* the answer: it would put the
-      double-tap window's delay in front of every single capture, which is the
-      one interaction that has to feel instant. The obvious alternative — a
-      second binding — costs a second recorder field in settings, and settings
-      are meant to stay as close to empty as possible. Neither is free; pick
-      when there is a reason to.
+- [x] **Double-tap the shortcut to show or hide the notepad.** Double-tap
+      was first ruled out because waiting for a possible second tap would delay
+      every capture. It works because nothing waits: the first tap starts recording at
+      once, and a second tap inside 400 ms cancels that capture (no model run,
+      no hook, no stop chime) and plays a single high note instead. On by
+      default, with a checkbox to turn it off.
 
 - [x] **Capture hooks.** The plugin system, as small as it can be: an
       executable named `on-capture` or `after-capture` in the app-data
@@ -320,6 +319,17 @@ every file written in the old order is one more file with a seam in it.
   capture into the editor's text puts it under the same heading if the editor
   still opens with it, and otherwise brings the heading along as a new entry —
   the heading can be edited away mid-capture, the capture cannot.
+- Double-tap is decided in `shortcut::Taps`, a pure state machine with its
+  own tests; the engine thread only acts on its verdicts. In push-to-talk a
+  hold under 250 ms is a tap, and its release is held back until the 400 ms
+  window closes. If no second tap comes, the capture is *discarded* rather
+  than transcribed. It was under the recorder's 250 ms floor anyway, and
+  transcribing it would also pick up the audio recorded while waiting. Its
+  stop chime is late by the length of the window.
+- Cancelling a capture surfaced a race that `stop` already had: a stop or cancel
+  that took the audio lock before the start worker did found nothing to stop,
+  and the worker then began a recording nobody would end. The worker now
+  checks the state after starting and ends the capture itself.
 
 ## M4 — Shippable
 

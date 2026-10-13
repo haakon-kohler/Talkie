@@ -32,6 +32,7 @@ Everything else in this file is in the app verbatim.
 | `settings.microphone.default` | First entry in the microphone list | Working label |
 | `settings.microphone.missing` | The list entry for a saved microphone that is not plugged in | Working label; `{name}` is the device |
 | `settings.shortcut.hint` | Under the shortcut field | Empty |
+| `settings.double_tap_notepad.label` | Checkbox under the push-to-talk one | Working label |
 
 ---
 
@@ -236,6 +237,13 @@ setting is still `push_to_talk`; only the checkbox reads backwards, so the label
 leads with "Toggle Record" and the parenthetical spells out what it turns off.
 
 > Toggle Record (Turn Off Push-to-Talk)
+
+`settings.double_tap_notepad.label` — *placeholder*, showing a working label.
+On by default. Two quick taps of the shortcut show the notepad, or hide it if it
+is already in front. The first tap still starts a capture; the second throws it
+away and plays a single high note instead of the stop chime.
+
+> Double-Tap Shortcut to Open Notepad
 
 `settings.play_sounds.label` — *live*
 
