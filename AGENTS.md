@@ -50,7 +50,8 @@ This is a known, accepted cost of the zero-node stance.
 ## Layout
 
 ```
-Cargo.toml        workspace: shared · ui · src-tauri   (release profile lives here)
+Cargo.toml        workspace: shared · ui · src-tauri   (release profile and clippy lints live here)
+clippy.toml       what tests may do that the code may not; product names doc_markdown accepts
 Trunk.toml        builds ui/index.html → dist/
 shared/           serde types + command/event names used by BOTH sides
   src/document.rs   the document contract as code: where a capture goes, how a save merges
@@ -79,6 +80,7 @@ src-tauri/src/
   settings.rs       tauri-plugin-store; the host owns settings, the UI never caches them
   windows.rs        show/hide + the macOS Accessory/Regular Dock dance
   tray.rs           menu-bar item and its menu
+  test_support.rs   helpers shared by the host's tests
 ```
 
 ## Rules that are easy to get wrong
