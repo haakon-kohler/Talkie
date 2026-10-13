@@ -70,11 +70,13 @@ impl Recorder {
         debug_assert!(
             matches!(
                 (from, next),
-                (RecorderState::Idle, RecorderState::Recording)
-                    | (RecorderState::Recording, RecorderState::Transcribing)
-                    | (RecorderState::Recording, RecorderState::Idle)
-                    | (RecorderState::Transcribing, RecorderState::Idle)
-                    | (RecorderState::Idle, RecorderState::Idle)
+                (
+                    RecorderState::Idle,
+                    RecorderState::Recording | RecorderState::Idle
+                ) | (
+                    RecorderState::Recording,
+                    RecorderState::Transcribing | RecorderState::Idle
+                ) | (RecorderState::Transcribing, RecorderState::Idle)
             ),
             "no such transition: {from:?} -> {next:?}"
         );
@@ -85,7 +87,9 @@ impl Recorder {
             }
             *guard = next;
         }
-        let _ = self.app.emit(events::RECORDER_STATE, next);
+        if let Err(e) = self.app.emit(events::RECORDER_STATE, next) {
+            log::warn!("talkie: could not announce {next:?}: {e}");
+        }
         tray::set_state(&self.app, next);
         true
     }
@@ -97,11 +101,13 @@ impl Recorder {
     /// `from` is the state the failing path believes it is in. If the machine
     /// has moved on — a stop arrived while the start was still failing — the
     /// newer path owns the state and this one only logs.
-    fn fail(&self, from: RecorderState, error: anyhow::Error) {
+    fn fail(&self, from: RecorderState, error: &anyhow::Error) {
         let message = format!("{error:#}");
         log::error!("talkie: {message}");
         notify(&self.app, &message);
-        let _ = self.app.emit(events::CAPTURE_FAILED, message);
+        if let Err(e) = self.app.emit(events::CAPTURE_FAILED, message) {
+            log::warn!("talkie: could not tell the editor the capture failed: {e}");
+        }
         if !self.transition(from, RecorderState::Idle) {
             log::warn!("talkie: capture failed in {from:?} but the recorder had already moved on");
         }
@@ -126,7 +132,7 @@ impl Recorder {
         if models::status(&self.app) != ModelStatus::Ready {
             self.fail(
                 RecorderState::Idle,
-                anyhow!(
+                &anyhow!(
                     // COPY: capture.no_model
                     "speech model not yet installed — finish first run to download it"
                 ),
@@ -144,7 +150,7 @@ impl Recorder {
         let this = Arc::clone(self);
         std::thread::spawn(move || {
             if let Err(e) = this.open_and_start() {
-                this.fail(RecorderState::Recording, e);
+                this.fail(RecorderState::Recording, &e);
             }
         });
     }
@@ -153,7 +159,7 @@ impl Recorder {
         let mut guard = self
             .audio
             .lock()
-            .map_err(|_| anyhow!("audio mutex poisoned"))?;
+            .map_err(|e| anyhow!("audio mutex poisoned: {e}"))?;
 
         if guard.is_none() {
             let vad_path = models::vad_path(&self.app)?;
@@ -165,9 +171,7 @@ impl Recorder {
                 VAD_HANGOVER_FRAMES,
                 VAD_ONSET_FRAMES,
             );
-            let recorder = AudioRecorder::new()
-                .map_err(|e| anyhow!("could not create the recorder: {e}"))?
-                .with_vad(Box::new(smoothed));
+            let recorder = AudioRecorder::new().with_vad(Box::new(smoothed));
             *guard = Some(recorder);
         }
 
@@ -261,7 +265,7 @@ impl Recorder {
                     let moved = this.transition(RecorderState::Transcribing, RecorderState::Idle);
                     debug_assert!(moved, "nothing else may leave Transcribing");
                 }
-                Err(e) => this.fail(RecorderState::Transcribing, e),
+                Err(e) => this.fail(RecorderState::Transcribing, &e),
             }
         });
     }
@@ -271,7 +275,7 @@ impl Recorder {
             let guard = self
                 .audio
                 .lock()
-                .map_err(|_| anyhow!("audio mutex poisoned"))?;
+                .map_err(|e| anyhow!("audio mutex poisoned: {e}"))?;
             let recorder = guard
                 .as_ref()
                 .ok_or_else(|| anyhow!("the microphone was never opened"))?;
@@ -300,7 +304,7 @@ impl Recorder {
         }
 
         let model_dir = models::model_path(&self.app)?;
-        let result = self.transcriber.transcribe(&model_dir, samples);
+        let result = self.transcriber.transcribe(&model_dir, &samples);
         // Scheduled on the error path too: a failed transcription still leaves
         // the model resident.
         self.transcriber.schedule_idle_unload();
@@ -341,20 +345,22 @@ fn notify(app: &AppHandle, message: &str) {
     let notification = app.notification();
     let permitted = match notification.permission_state() {
         Ok(PermissionState::Granted) => true,
-        Ok(PermissionState::Denied) => false,
+        Ok(PermissionState::Denied) | Err(_) => false,
         Ok(_) => matches!(
             notification.request_permission(),
             Ok(PermissionState::Granted)
         ),
-        Err(_) => false,
     };
     if !permitted {
         return;
     }
 
-    let _ = notification
+    if let Err(e) = notification
         .builder()
         .title(talkie_shared::APP_NAME)
         .body(message)
-        .show();
+        .show()
+    {
+        log::warn!("talkie: could not show the failure as a notification: {e}");
+    }
 }

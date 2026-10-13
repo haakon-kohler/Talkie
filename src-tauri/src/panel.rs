@@ -17,6 +17,10 @@ use anyhow::{anyhow, Result};
 use tauri::AppHandle;
 
 /// The file a folder choice resolves to.
+#[cfg_attr(
+    all(not(target_os = "macos"), not(test)),
+    expect(dead_code, reason = "only the macOS panel resolves a choice")
+)]
 pub const DEFAULT_FILE_NAME: &str = "talkie.md";
 
 /// Open the panel as a sheet on the settings window and wait for an answer.
@@ -48,7 +52,12 @@ pub async fn choose_note_path(app: &AppHandle, current: &Path) -> Result<Option<
 
     let (tx, rx) = tokio::sync::oneshot::channel::<Option<PathBuf>>();
     app.run_on_main_thread(move || {
-        let mtm = MainThreadMarker::new().expect("run_on_main_thread runs on the main thread");
+        // `run_on_main_thread` runs on the main thread. Should it not, the
+        // sender drops unanswered and the command reports that instead.
+        let Some(mtm) = MainThreadMarker::new() else {
+            log::warn!("talkie: the file panel was asked for off the main thread");
+            return;
+        };
         let ns_window = match window.ns_window() {
             Ok(ptr) => ptr,
             Err(e) => {
@@ -89,6 +98,10 @@ pub async fn choose_note_path(app: &AppHandle, current: &Path) -> Result<Option<
                 .flatten()
                 .and_then(|url| url.path())
                 .map(|path| resolve_choice(PathBuf::from(path.to_string())));
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the command only stops waiting if its webview has gone"
+            )]
             let _ = tx.send(path);
         });
         panel.beginSheetModalForWindow_completionHandler(ns_window, &handler);
@@ -96,15 +109,23 @@ pub async fn choose_note_path(app: &AppHandle, current: &Path) -> Result<Option<
     .map_err(|e| anyhow!("could not open the file panel: {e}"))?;
 
     rx.await
-        .map_err(|_| anyhow!("the file panel closed without answering"))
+        .map_err(|e| anyhow!("the file panel closed without answering: {e}"))
 }
 
 #[cfg(not(target_os = "macos"))]
+#[expect(
+    clippy::unused_async,
+    reason = "the macOS panel is awaited; this stand-in shares its signature"
+)]
 pub async fn choose_note_path(_app: &AppHandle, _current: &Path) -> Result<Option<PathBuf>> {
     Err(anyhow!("the file panel is only built for macOS"))
 }
 
 /// A folder means "the notes file goes in here"; a file means itself.
+#[cfg_attr(
+    all(not(target_os = "macos"), not(test)),
+    expect(dead_code, reason = "only the macOS panel resolves a choice")
+)]
 fn resolve_choice(chosen: PathBuf) -> PathBuf {
     if chosen.is_dir() {
         chosen.join(DEFAULT_FILE_NAME)
@@ -128,7 +149,7 @@ mod tests {
         let file = std::env::temp_dir().join("talkie-panel-test-notes.md");
         std::fs::write(&file, b"").expect("temp file");
         assert_eq!(resolve_choice(file.clone()), file);
-        let _ = std::fs::remove_file(&file);
+        std::fs::remove_file(&file).expect("remove the temp file");
     }
 
     #[test]

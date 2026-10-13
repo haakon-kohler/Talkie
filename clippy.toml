@@ -1,0 +1,11 @@
+# Tests are where a panic belongs: a failed assumption should fail the test
+# loudly. The matching lints are denied everywhere else (see Cargo.toml).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests = true
+
+# Product names, not code, so doc_markdown should not ask for backticks. ".."
+# keeps clippy's own list (macOS, GitHub, WebAssembly, …).
+doc-valid-idents = ["AppKit", "CodeMirror", "FSEvents", "WindowServer", ".."]

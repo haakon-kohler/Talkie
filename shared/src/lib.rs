@@ -91,6 +91,7 @@ pub enum WindowLabel {
 }
 
 impl WindowLabel {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             WindowLabel::Editor => "editor",
@@ -99,6 +100,7 @@ impl WindowLabel {
         }
     }
 
+    #[must_use]
     pub fn parse(label: &str) -> Option<Self> {
         match label {
             "editor" => Some(WindowLabel::Editor),
@@ -126,6 +128,10 @@ pub enum RecorderState {
 /// `set_settings`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent switch in the form, and this struct is the store's on-disk shape"
+)]
 pub struct Settings {
     /// Absolute path to the one long markdown file. Empty means "not resolved
     /// yet" — the host fills in `~/Documents/Talkie/talkie.md` on first load.
@@ -225,12 +231,18 @@ pub struct ModelProgress {
 }
 
 impl ModelProgress {
+    #[must_use]
     pub fn fraction(&self) -> Option<f32> {
         let total = self.total_bytes?;
         if total == 0 {
             return None;
         }
-        Some(self.downloaded_bytes as f32 / total as f32)
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a progress bar needs a rough fraction, not every byte"
+        )]
+        let fraction = self.downloaded_bytes as f32 / total as f32;
+        Some(fraction)
     }
 }
 

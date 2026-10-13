@@ -37,7 +37,11 @@ trunk build                # frontend only
 trunk serve                # frontend only, on :1420
 
 cargo check -p talkie      # host
-cargo fmt && cargo clippy  # before committing
+
+# before committing — both clippy runs must be clean
+cargo fmt
+cargo clippy --workspace --all-targets
+cargo clippy -p talkie-ui --all-targets --target wasm32-unknown-unknown
 ```
 
 There is no HMR. Trunk rebuilds the WASM (a few seconds) and reloads the page.
@@ -46,7 +50,8 @@ This is a known, accepted cost of the zero-node stance.
 ## Layout
 
 ```
-Cargo.toml        workspace: shared · ui · src-tauri   (release profile lives here)
+Cargo.toml        workspace: shared · ui · src-tauri   (release profile and clippy lints live here)
+clippy.toml       what tests may do that the code may not; product names doc_markdown accepts
 Trunk.toml        builds ui/index.html → dist/
 shared/           serde types + command/event names used by BOTH sides
   src/document.rs   the document contract as code: where a capture goes, how a save merges
@@ -75,6 +80,7 @@ src-tauri/src/
   settings.rs       tauri-plugin-store; the host owns settings, the UI never caches them
   windows.rs        show/hide + the macOS Accessory/Regular Dock dance
   tray.rs           menu-bar item and its menu
+  test_support.rs   helpers shared by the host's tests
 ```
 
 ## Rules that are easy to get wrong
@@ -178,6 +184,34 @@ src-tauri/src/
 - **`PROGRESS.md` keeps no backlog.** Track the current milestone and the next
   one. Do not add a "later" section, and do not reinstate one you find deleted —
   deferred work either comes back on its own or was never worth listing.
+- **Clippy is strict, and every lint is `deny`.** The list is
+  `[workspace.lints.clippy]` in the root `Cargo.toml`: all of `pedantic`, plus
+  lints picked one at a time against panics (`unwrap_used`, `indexing_slicing`,
+  `string_slice`, `panic_in_result_fn`, …) and against silent failure
+  (`let_underscore_must_use`, `map_err_ignore`). `clippy.toml` lets tests
+  panic. `#[allow]` is itself denied. The only way past a lint is
+  `#[expect(lint, reason = "…")]` on the narrowest item, and the reason names
+  the invariant that makes the code correct ("the offset is a sum of whole
+  lines"), not the wish to compile.
+- **Never satisfy a lint by making up a value.** `.unwrap_or(0)`,
+  `.unwrap_or_default()`, `saturating_sub` or `.get(i).unwrap_or("")` where
+  the code used to panic turns a loud crash, which lands in `debug.log`, into
+  text written to the wrong place in `talkie.md`. Propagate with `?` where the
+  function can fail. Where it cannot, `.expect("why this holds")` is allowed
+  (`expect_used` is deliberately off) and says the same thing as a panic, out
+  loud. A `let _ =` that drops an error gets the same treatment: handle it, log
+  it, or `#[expect(clippy::let_underscore_must_use, reason = "…")]` saying why
+  nobody needs to know.
+- **Clippy on Linux does not see the macOS code.** `login_item.rs`,
+  `panel.rs`, the event-tap half of `shortcut.rs` and `windows.rs` are
+  `cfg(target_os = "macos")` and need the macOS SDK to build, so lint on the
+  Mac before merging. The Linux stand-ins draw lints the real code does not
+  (`unused_async`, `unnecessary_wraps`, `dead_code`): silence those with
+  `#[cfg_attr(not(target_os = "macos"), expect(…, reason = "…"))]`. A bare
+  `#[expect]` goes unfulfilled, and warns, on the other platform.
+- **Bumping the toolchain is a lint change.** `rust-toolchain.toml` pins an
+  exact version because every release adds lints and every lint is deny. Bump
+  it on purpose, and fix what the new clippy finds in the same commit.
 - **The document contract is public API.** One H2 per minute of capture,
   local time, **newest first** — a capture in the minute the top heading
   already names goes directly under it as its own paragraph — blank line
@@ -189,8 +223,8 @@ src-tauri/src/
 
 ## Code style
 
-- Rust: `cargo fmt`, `cargo clippy`, no `unwrap` in paths that can fail at
-  runtime, doc comments on public items.
+- Rust: `cargo fmt`, both clippy runs clean (see Commands), doc comments on
+  public items.
 - CSS: handwritten, tokens at the top of `app.css`, light/dark via
   `prefers-color-scheme`.
 - Commits: conventional prefixes (`feat:`, `fix:`, `docs:`, `refactor:`,

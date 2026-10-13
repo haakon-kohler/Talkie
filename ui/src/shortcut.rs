@@ -24,30 +24,66 @@ struct Pending {
     has_key: bool,
 }
 
-#[component]
-pub fn ShortcutField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
-    let recording = RwSignal::new(false);
-    let preview = RwSignal::new(String::new());
-    let error = RwSignal::new(String::new());
-    let pending = RwSignal::new(Pending::default());
+/// The field's state. Every part of it is a signal, so a copy is another
+/// handle on the same field: the click handler, the key-event listener and the
+/// async tasks each hold one.
+#[derive(Clone, Copy)]
+struct Recorder {
+    settings: RwSignal<Option<Settings>>,
+    recording: RwSignal<bool>,
+    preview: RwSignal<String>,
+    error: RwSignal<String>,
+    pending: RwSignal<Pending>,
+}
 
-    // Leaving recording mode is the same three lines from four places, so it is
-    // worth a name: tell the host, then put the field back to rest.
-    let finish = move || {
-        recording.set(false);
-        preview.set(String::new());
-        pending.set(Pending::default());
+impl Recorder {
+    fn new(settings: RwSignal<Option<Settings>>) -> Self {
+        Self {
+            settings,
+            recording: RwSignal::new(false),
+            preview: RwSignal::new(String::new()),
+            error: RwSignal::new(String::new()),
+            pending: RwSignal::new(Pending::default()),
+        }
+    }
+
+    fn start(self) {
+        if self.recording.get_untracked() {
+            return;
+        }
+        self.error.set(String::new());
+        self.preview.set(String::new());
+        self.pending.set(Pending::default());
         spawn_local(async move {
-            let _ = ipc::fire(commands::STOP_SHORTCUT_RECORDING).await;
+            match ipc::fire(commands::START_SHORTCUT_RECORDING).await {
+                Ok(()) => self.recording.set(true),
+                // Almost always the missing Accessibility grant.
+                Err(e) => self.error.set(e),
+            }
         });
-    };
+    }
 
-    let commit = move |hotkey: String| {
-        let Some(shown) = settings.get_untracked() else {
+    /// Leave recording mode, which happens from four places: tell the host,
+    /// then put the field back to rest.
+    fn finish(self) {
+        self.recording.set(false);
+        self.preview.set(String::new());
+        self.pending.set(Pending::default());
+        spawn_local(async move {
+            if let Err(e) = ipc::fire(commands::STOP_SHORTCUT_RECORDING).await {
+                web_sys::console::warn_1(
+                    &format!("talkie: could not stop recording the shortcut: {e}").into(),
+                );
+            }
+        });
+    }
+
+    fn commit(self, hotkey: String) {
+        let Some(shown) = self.settings.get_untracked() else {
             return;
         };
         if shown.shortcut == hotkey {
-            finish();
+            self.finish();
             return;
         }
 
@@ -58,44 +94,42 @@ pub fn ShortcutField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
             let mut current = match ipc::fetch::<Settings>(commands::GET_SETTINGS).await {
                 Ok(current) => current,
                 Err(e) => {
-                    error.set(e);
-                    finish();
+                    self.error.set(e);
+                    self.finish();
                     return;
                 }
             };
-            current.shortcut = hotkey.clone();
+            current.shortcut.clone_from(&hotkey);
             let args = SetSettingsArgs { settings: current };
             // The host validates and re-binds; an unbindable combination comes
             // back as an error and the old shortcut is left alone.
             match ipc::call_void(commands::SET_SETTINGS, &args).await {
-                Ok(()) => settings.update(|s| {
+                Ok(()) => self.settings.update(|s| {
                     if let Some(s) = s {
                         s.shortcut = hotkey;
                     }
                 }),
-                Err(e) => error.set(e),
+                Err(e) => self.error.set(e),
             }
-            finish();
+            self.finish();
         });
-    };
+    }
 
-    // One subscription for the window's lifetime; it ignores everything unless
-    // the field is actually recording.
-    ipc::listen::<ShortcutCapture, _>(events::SHORTCUT_CAPTURE, move |event| {
-        if !recording.get_untracked() {
+    fn on_capture(self, event: ShortcutCapture) {
+        if !self.recording.get_untracked() {
             return;
         }
 
         if event.is_escape && event.is_key_down {
-            finish();
+            self.finish();
             return;
         }
 
         if !event.hotkey.is_empty() {
-            preview.set(event.display.clone());
-            let seen = pending.get_untracked();
+            self.preview.set(event.display.clone());
+            let seen = self.pending.get_untracked();
             if event.has_key || !seen.has_key {
-                pending.set(Pending {
+                self.pending.set(Pending {
                     hotkey: event.hotkey,
                     has_key: event.has_key,
                 });
@@ -108,34 +142,18 @@ pub fn ShortcutField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
         // *all* of them — rather than the first release — is what lets a
         // modifier-only shortcut like a held right ⌘ be recorded at all.
         if !event.is_key_down {
-            let seen = pending.get_untracked();
+            let seen = self.pending.get_untracked();
             if seen.hotkey.is_empty() {
-                finish();
+                self.finish();
             } else {
-                commit(seen.hotkey);
+                self.commit(seen.hotkey);
             }
         }
-    });
+    }
 
-    let start = move |_| {
-        if recording.get_untracked() {
-            return;
-        }
-        error.set(String::new());
-        preview.set(String::new());
-        pending.set(Pending::default());
-        spawn_local(async move {
-            match ipc::fire(commands::START_SHORTCUT_RECORDING).await {
-                Ok(()) => recording.set(true),
-                // Almost always the missing Accessibility grant.
-                Err(e) => error.set(e),
-            }
-        });
-    };
-
-    let label = move || {
-        if recording.get() {
-            let live = preview.get();
+    fn label(self) -> String {
+        if self.recording.get() {
+            let live = self.preview.get();
             return if live.is_empty() {
                 // COPY: settings.shortcut.recording
                 "Press keys…".to_string()
@@ -143,14 +161,25 @@ pub fn ShortcutField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
                 live
             };
         }
-        match settings.get().map(|s| s.shortcut) {
+        match self.settings.get().map(|s| s.shortcut) {
             Some(shortcut) if !shortcut.trim().is_empty() => {
                 talkie_shared::format_shortcut(&shortcut)
             }
             // COPY: settings.shortcut.empty
             _ => "None".to_string(),
         }
-    };
+    }
+}
+
+#[component]
+pub fn ShortcutField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
+    let field = Recorder::new(settings);
+
+    // One subscription for the window's lifetime; it ignores everything unless
+    // the field is actually recording.
+    ipc::listen::<ShortcutCapture, _>(events::SHORTCUT_CAPTURE, move |event| {
+        field.on_capture(event);
+    });
 
     view! {
         <div class="field">
@@ -159,21 +188,21 @@ pub fn ShortcutField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
             <button
                 type="button"
                 class="shortcut-field"
-                class:recording=move || recording.get()
-                on:click=start
+                class:recording=move || field.recording.get()
+                on:click=move |_| field.start()
                 // While recording, the keys are also going to the focused
                 // window. Swallowing them here keeps a recorded ⌘W from
                 // closing the settings window on the way past.
                 on:keydown=move |ev| {
-                    if recording.get() {
+                    if field.recording.get() {
                         ev.prevent_default();
                     }
                 }
             >
-                {label}
+                {move || field.label()}
             </button>
-            <Show when=move || !error.get().is_empty()>
-                <span class="status error">{move || error.get()}</span>
+            <Show when=move || !field.error.get().is_empty()>
+                <span class="status error">{move || field.error.get()}</span>
             </Show>
         </div>
     }

@@ -6,5 +6,8 @@ license.workspace = true
 authors.workspace = true
 description = "Types and command/event names shared by Talkie's Tauri host and its Leptos UI."
 
+[lints]
+workspace = true
+
 [dependencies]
 serde = { workspace = true }

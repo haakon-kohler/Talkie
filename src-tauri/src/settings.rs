@@ -3,7 +3,7 @@
 //! The UI has no store of its own: it reads through `get_settings` and writes
 //! through `set_settings`, and every write is persisted before it is announced.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use talkie_shared::Settings;
 use tauri::{AppHandle, Runtime};
@@ -29,6 +29,19 @@ const SCHEMA: u64 = 1;
 
 /// The live settings, managed as Tauri state.
 pub struct SettingsState(pub Mutex<Settings>);
+
+impl SettingsState {
+    /// The settings, for code that can report a failure rather than panic.
+    ///
+    /// Only a panic while the lock is held poisons it, and a release build
+    /// aborts on the panic first, so this fails only in a debug build after
+    /// some other bug.
+    pub fn lock(&self) -> Result<MutexGuard<'_, Settings>, String> {
+        self.0
+            .lock()
+            .map_err(|e| format!("the settings are unavailable: {e}"))
+    }
+}
 
 /// `~/Documents/Talkie/talkie.md` — the one long file, until the user points
 /// Talkie somewhere else (an Obsidian vault, say).
@@ -113,5 +126,29 @@ mod tests {
         };
         migrate(&mut settings, SCHEMA);
         assert!(!settings.push_to_talk);
+    }
+
+    /// Commands that can fail report a poisoned settings lock as an error
+    /// rather than panicking a second time.
+    #[test]
+    fn a_poisoned_lock_is_an_error_not_a_panic() {
+        let state = SettingsState(Mutex::new(Settings::default()));
+        assert!(state.lock().is_ok());
+
+        let poisoner = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let _guard = state.0.lock();
+                    panic!("poison the settings lock");
+                })
+                .join()
+        });
+        assert!(
+            poisoner.is_err(),
+            "the poisoning thread should have panicked"
+        );
+
+        let error = state.lock().expect_err("a poisoned lock must be an error");
+        assert!(error.starts_with("the settings are unavailable"), "{error}");
     }
 }

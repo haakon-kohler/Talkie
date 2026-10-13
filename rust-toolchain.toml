@@ -2,6 +2,12 @@
 # Pinning here makes rustup fetch the wasm target automatically — but only when
 # `cargo` resolves to rustup's shim. If a Homebrew rust shadows it on PATH, the
 # wasm build fails with "can't find crate for `core`". See AGENTS.md.
+#
+# The version is exact, not "stable": clippy runs with every lint at "deny", and
+# each release adds lints. A floating channel would fail the lint check on code
+# nobody touched. Bump it on purpose, and fix what the new clippy finds in the
+# same commit.
 [toolchain]
-channel = "stable"
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
 targets = ["wasm32-unknown-unknown"]

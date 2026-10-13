@@ -89,9 +89,9 @@ impl ShortcutState {
     fn send(&self, cmd: Cmd) -> Result<(), String> {
         self.tx
             .lock()
-            .map_err(|_| "the shortcut engine is wedged".to_string())?
+            .map_err(|e| format!("the shortcut engine is wedged: {e}"))?
             .send(cmd)
-            .map_err(|_| "the shortcut engine has stopped".to_string())
+            .map_err(|e| format!("the shortcut engine has stopped: {e}"))
     }
 
     /// Send a command and wait — a bounded time — for the thread's verdict.
@@ -124,7 +124,7 @@ pub fn init(app: &AppHandle) {
     let handle = app.clone();
     std::thread::Builder::new()
         .name("talkie-shortcut".into())
-        .spawn(move || run(handle, rx))
+        .spawn(move || run(handle, &rx))
         .expect("could not start the shortcut engine thread");
     app.manage(ShortcutState { tx: Mutex::new(tx) });
 }
@@ -136,7 +136,7 @@ pub fn init(app: &AppHandle) {
 pub fn apply(app: &AppHandle) -> Result<()> {
     let accelerator = {
         let state = app.state::<SettingsState>();
-        let settings = state.0.lock().expect("settings mutex poisoned");
+        let settings = state.lock().map_err(anyhow::Error::msg)?;
         settings.shortcut.clone()
     };
 
@@ -181,7 +181,7 @@ struct Engine {
     trust_checked: Instant,
 }
 
-fn run(app: AppHandle, rx: Receiver<Cmd>) {
+fn run(app: AppHandle, rx: &Receiver<Cmd>) {
     let mut engine = Engine {
         app,
         manager: None,
@@ -251,10 +251,18 @@ impl Engine {
             Cmd::Bind { accelerator, reply } => {
                 self.wanted = accelerator;
                 let result = self.rebind();
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "a caller that gave up waiting has already reported REPLY_TIMEOUT"
+                )]
                 let _ = reply.send(result);
             }
             Cmd::StartRecording { reply } => {
                 let result = self.start_recording();
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "a caller that gave up waiting has already reported REPLY_TIMEOUT"
+                )]
                 let _ = reply.send(result);
             }
             Cmd::StopRecording => self.stop_recording(),
@@ -267,14 +275,14 @@ impl Engine {
     /// before Accessibility is granted — and on first run it is granted *after*
     /// the app has already started.
     fn manager(&mut self) -> Result<&HotkeyManager, String> {
-        if self.manager.is_none() {
+        let manager = match self.manager.take() {
+            Some(manager) => manager,
             // Blocking mode: a bound shortcut is Talkie's and does not also
             // reach whatever is in front. That is what makes a held modifier
             // usable as a push-to-talk key rather than a stray ⌘.
-            let manager = HotkeyManager::new_with_blocking().map_err(|e| e.to_string())?;
-            self.manager = Some(manager);
-        }
-        Ok(self.manager.as_ref().expect("just built"))
+            None => HotkeyManager::new_with_blocking().map_err(|e| e.to_string())?,
+        };
+        Ok(self.manager.insert(manager))
     }
 
     /// Bind `wanted`, dropping any previous binding first.
@@ -324,7 +332,11 @@ impl Engine {
 
     fn unbind(&mut self) {
         if let (Some(id), Some(manager)) = (self.bound.take(), self.manager.as_ref()) {
-            let _ = manager.unregister(id);
+            // Forgotten either way: the manager hands out a fresh id on the
+            // next bind. Still worth knowing, as the old one may stay live.
+            if let Err(e) = manager.unregister(id) {
+                log::warn!("talkie: could not release the previous shortcut: {e}");
+            }
         }
     }
 
@@ -432,6 +444,13 @@ pub fn accessibility_granted() -> bool {
 }
 
 /// Open System Settings at the pane where the switch lives.
+#[cfg_attr(
+    not(target_os = "macos"),
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "only the macOS half can fail; both halves share one signature"
+    )
+)]
 pub fn open_accessibility_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {

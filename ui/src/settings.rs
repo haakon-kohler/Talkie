@@ -21,26 +21,6 @@ use crate::shortcut::ShortcutField;
 pub fn SettingsPage() -> impl IntoView {
     let settings = RwSignal::new(None::<Settings>);
     let status = RwSignal::new(String::new());
-    // `None` until the list has been taken at least once.
-    let microphones = RwSignal::new(None::<Vec<MicrophoneInfo>>);
-
-    // The device list is a snapshot with nothing to invalidate it — cpal has
-    // no device-change notification — so it is taken again every time the
-    // list is about to be looked at, and never before. Enumerating inputs
-    // reads each device's stream formats, which macOS counts as asking for
-    // the microphone; this window is built hidden at launch, so taking the
-    // list on mount put the system prompt on screen before onboarding had
-    // reached its microphone step.
-    let refresh_microphones = move || {
-        spawn_local(async move {
-            match ipc::fetch::<Vec<MicrophoneInfo>>(commands::LIST_MICROPHONES).await {
-                Ok(list) => microphones.set(Some(list)),
-                Err(e) => web_sys::console::warn_1(
-                    &format!("talkie: could not list microphones: {e}").into(),
-                ),
-            }
-        });
-    };
 
     Effect::new(move |_| {
         spawn_local(async move {
@@ -50,24 +30,6 @@ pub fn SettingsPage() -> impl IntoView {
             }
         });
     });
-
-    // The panel answers with a path and nothing else; the field takes it and
-    // Save validates it exactly as it would a typed one.
-    let choose_note_path = move |_| {
-        spawn_local(async move {
-            match ipc::fetch::<Option<String>>(commands::PICK_NOTE_PATH).await {
-                Ok(Some(path)) => {
-                    settings.update(|s| {
-                        if let Some(s) = s {
-                            s.note_path = path;
-                        }
-                    });
-                }
-                Ok(None) => {}
-                Err(e) => status.set(format!("Could not open the file panel: {e}")),
-            }
-        });
-    };
 
     let save = move |_| {
         let Some(current) = settings.get_untracked() else {
@@ -90,22 +52,7 @@ pub fn SettingsPage() -> impl IntoView {
                 when=move || settings.get().is_some()
                 fallback=|| view! { <p class="muted">"Loading…"</p> }
             >
-                <label class="field">
-                    // COPY: settings.note_path.label
-                    <span class="field-label">"Notes file"</span>
-                    <div class="field-row">
-                        <input
-                            type="text"
-                            prop:value=move || settings.get().map(|s| s.note_path).unwrap_or_default()
-                            on:input=move |ev| {
-                                let value = event_target_value(&ev);
-                                settings.update(|s| { if let Some(s) = s { s.note_path = value; } });
-                            }
-                        />
-                        // COPY: settings.note_path.browse — placeholder
-                        <button type="button" class="secondary" on:click=choose_note_path>"Choose…"</button>
-                    </div>
-                </label>
+                <NotePathField settings=settings status=status />
 
                 // Records and saves itself the moment the keys come up, so it
                 // is deliberately outside the Save button's remit.
@@ -116,53 +63,7 @@ pub fn SettingsPage() -> impl IntoView {
                 // but macOS drops the grant whenever the binary changes.
                 <AccessibilitySection on_ready=|| {} />
 
-                <label class="field">
-                    // COPY: settings.microphone.label — placeholder
-                    <span class="field-label">"Microphone"</span>
-                    <select
-                        on:focus=move |_| refresh_microphones()
-                        on:pointerenter=move |_| refresh_microphones()
-                        on:change=move |ev| {
-                            let value = event_target_value(&ev);
-                            let chosen = (!value.is_empty()).then_some(value);
-                            settings.update(|s| { if let Some(s) = s { s.microphone = chosen; } });
-                        }
-                    >
-                        {move || {
-                            let chosen = settings.get().and_then(|s| s.microphone);
-                            let fetched = microphones.get();
-                            let list = fetched.clone().unwrap_or_default();
-                            let mut options = vec![view! {
-                                // COPY: settings.microphone.default — placeholder
-                                <option value="" selected=chosen.is_none()>"System default"</option>
-                            }.into_any()];
-                            for mic in &list {
-                                let selected = chosen.as_deref() == Some(mic.name.as_str());
-                                options.push(view! {
-                                    <option value=mic.name.clone() selected=selected>{mic.name.clone()}</option>
-                                }.into_any());
-                            }
-                            // A stored microphone that is not plugged in right
-                            // now stays visible, marked, rather than silently
-                            // reading as the default while the store says
-                            // otherwise. The recorder falls back on its own.
-                            // Before the first look it is only shown, not
-                            // judged: nothing is known about it yet.
-                            if let Some(name) = chosen.filter(|name| !list.iter().any(|m| &m.name == name)) {
-                                let label = if fetched.is_some() {
-                                    // COPY: settings.microphone.missing — placeholder
-                                    format!("{name} (not connected)")
-                                } else {
-                                    name.clone()
-                                };
-                                options.push(view! {
-                                    <option value=name.clone() selected=true>{label}</option>
-                                }.into_any());
-                            }
-                            options
-                        }}
-                    </select>
-                </label>
+                <MicrophoneField settings=settings />
 
                 // Inverted on purpose: push-to-talk is the default, so the box
                 // is the way *out* of it and ships unchecked. The stored field
@@ -170,7 +71,7 @@ pub fn SettingsPage() -> impl IntoView {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        prop:checked=move || settings.get().map(|s| !s.push_to_talk).unwrap_or(false)
+                        prop:checked=move || settings.get().is_some_and(|s| !s.push_to_talk)
                         on:change=move |ev| {
                             let value = event_target_checked(&ev);
                             settings.update(|s| { if let Some(s) = s { s.push_to_talk = !value; } });
@@ -183,7 +84,7 @@ pub fn SettingsPage() -> impl IntoView {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        prop:checked=move || settings.get().map(|s| s.play_sounds).unwrap_or(true)
+                        prop:checked=move || settings.get().is_none_or(|s| s.play_sounds)
                         on:change=move |ev| {
                             let value = event_target_checked(&ev);
                             settings.update(|s| { if let Some(s) = s { s.play_sounds = value; } });
@@ -195,7 +96,7 @@ pub fn SettingsPage() -> impl IntoView {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        prop:checked=move || settings.get().map(|s| s.launch_at_login).unwrap_or(false)
+                        prop:checked=move || settings.get().is_some_and(|s| s.launch_at_login)
                         on:change=move |ev| {
                             let value = event_target_checked(&ev);
                             settings.update(|s| { if let Some(s) = s { s.launch_at_login = value; } });
@@ -219,5 +120,121 @@ pub fn SettingsPage() -> impl IntoView {
                 </section>
             </Show>
         </div>
+    }
+}
+
+/// The notes-file path: typed, or picked in the native panel.
+#[component]
+fn NotePathField(settings: RwSignal<Option<Settings>>, status: RwSignal<String>) -> impl IntoView {
+    // The panel answers with a path and nothing else; the field takes it and
+    // Save validates it exactly as it would a typed one.
+    let choose_note_path = move |_| {
+        spawn_local(async move {
+            match ipc::fetch::<Option<String>>(commands::PICK_NOTE_PATH).await {
+                Ok(Some(path)) => {
+                    settings.update(|s| {
+                        if let Some(s) = s {
+                            s.note_path = path;
+                        }
+                    });
+                }
+                Ok(None) => {}
+                Err(e) => status.set(format!("Could not open the file panel: {e}")),
+            }
+        });
+    };
+
+    view! {
+        <label class="field">
+            // COPY: settings.note_path.label
+            <span class="field-label">"Notes file"</span>
+            <div class="field-row">
+                <input
+                    type="text"
+                    prop:value=move || settings.get().map(|s| s.note_path).unwrap_or_default()
+                    on:input=move |ev| {
+                        let value = event_target_value(&ev);
+                        settings.update(|s| { if let Some(s) = s { s.note_path = value; } });
+                    }
+                />
+                // COPY: settings.note_path.browse — placeholder
+                <button type="button" class="secondary" on:click=choose_note_path>"Choose…"</button>
+            </div>
+        </label>
+    }
+}
+
+/// The input device, with the system default first.
+#[component]
+fn MicrophoneField(settings: RwSignal<Option<Settings>>) -> impl IntoView {
+    // `None` until the list has been taken at least once.
+    let microphones = RwSignal::new(None::<Vec<MicrophoneInfo>>);
+
+    // The device list is a snapshot with nothing to invalidate it — cpal has
+    // no device-change notification — so it is taken again every time the
+    // list is about to be looked at, and never before. Enumerating inputs
+    // reads each device's stream formats, which macOS counts as asking for
+    // the microphone; this window is built hidden at launch, so taking the
+    // list on mount put the system prompt on screen before onboarding had
+    // reached its microphone step.
+    let refresh_microphones = move || {
+        spawn_local(async move {
+            match ipc::fetch::<Vec<MicrophoneInfo>>(commands::LIST_MICROPHONES).await {
+                Ok(list) => microphones.set(Some(list)),
+                Err(e) => web_sys::console::warn_1(
+                    &format!("talkie: could not list microphones: {e}").into(),
+                ),
+            }
+        });
+    };
+
+    view! {
+        <label class="field">
+            // COPY: settings.microphone.label — placeholder
+            <span class="field-label">"Microphone"</span>
+            <select
+                on:focus=move |_| refresh_microphones()
+                on:pointerenter=move |_| refresh_microphones()
+                on:change=move |ev| {
+                    let value = event_target_value(&ev);
+                    let chosen = (!value.is_empty()).then_some(value);
+                    settings.update(|s| { if let Some(s) = s { s.microphone = chosen; } });
+                }
+            >
+                {move || {
+                    let chosen = settings.get().and_then(|s| s.microphone);
+                    let fetched = microphones.get();
+                    let list = fetched.clone().unwrap_or_default();
+                    let mut options = vec![view! {
+                        // COPY: settings.microphone.default — placeholder
+                        <option value="" selected=chosen.is_none()>"System default"</option>
+                    }.into_any()];
+                    for mic in &list {
+                        let selected = chosen.as_deref() == Some(mic.name.as_str());
+                        options.push(view! {
+                            <option value=mic.name.clone() selected=selected>{mic.name.clone()}</option>
+                        }.into_any());
+                    }
+                    // A stored microphone that is not plugged in right
+                    // now stays visible, marked, rather than silently
+                    // reading as the default while the store says
+                    // otherwise. The recorder falls back on its own.
+                    // Before the first look it is only shown, not
+                    // judged: nothing is known about it yet.
+                    if let Some(name) = chosen.filter(|name| !list.iter().any(|m| &m.name == name)) {
+                        let label = if fetched.is_some() {
+                            // COPY: settings.microphone.missing — placeholder
+                            format!("{name} (not connected)")
+                        } else {
+                            name.clone()
+                        };
+                        options.push(view! {
+                            <option value=name.clone() selected=true>{label}</option>
+                        }.into_any());
+                    }
+                    options
+                }}
+            </select>
+        </label>
     }
 }

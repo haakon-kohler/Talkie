@@ -46,7 +46,9 @@ pub fn read(note_path: &Path) -> Result<String> {
     match fs::read_to_string(note_path) {
         Ok(text) => Ok(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(e) => Err(e).with_context(|| format!("could not read the notes file {note_path:?}")),
+        Err(e) => {
+            Err(e).with_context(|| format!("could not read the notes file {}", note_path.display()))
+        }
     }
 }
 
@@ -63,7 +65,7 @@ pub fn read(note_path: &Path) -> Result<String> {
 pub fn write(note_path: &Path, text: &str) -> Result<()> {
     if let Some(parent) = note_path.parent() {
         fs::create_dir_all(parent)
-            .with_context(|| format!("could not create the notes folder {parent:?}"))?;
+            .with_context(|| format!("could not create the notes folder {}", parent.display()))?;
     }
 
     let text = document::normalized(text);
@@ -77,11 +79,19 @@ pub fn write(note_path: &Path, text: &str) -> Result<()> {
         temp != note_path,
         "the scratch file must not be the note itself"
     );
-    fs::write(&temp, text.as_bytes())
-        .with_context(|| format!("could not write {temp:?} while saving the notes file"))?;
+    fs::write(&temp, text.as_bytes()).with_context(|| {
+        format!(
+            "could not write {} while saving the notes file",
+            temp.display()
+        )
+    })?;
     fs::rename(&temp, note_path).with_context(|| {
-        let _ = fs::remove_file(&temp);
-        format!("could not replace the notes file {note_path:?}")
+        // The failed rename is the error worth reporting; the scratch file it
+        // leaves in the notes folder is worth a line in the journal.
+        if let Err(e) = fs::remove_file(&temp) {
+            log::warn!("talkie: could not delete {}: {e}", temp.display());
+        }
+        format!("could not replace the notes file {}", note_path.display())
     })?;
     Ok(())
 }
@@ -93,10 +103,10 @@ pub fn write(note_path: &Path, text: &str) -> Result<()> {
 /// flight at once, and one truncating another's scratch file costs the note.
 fn temp_sibling(note_path: &Path) -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    let name = note_path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "talkie.md".to_string());
+    let name = note_path.file_name().map_or_else(
+        || "talkie.md".to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
     let temp_name = format!(
         ".{name}.talkie-{}-{}.tmp",
         std::process::id(),
@@ -176,7 +186,7 @@ mod tests {
 
     fn temp_note(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("talkie-note-test-{name}"));
-        let _ = fs::remove_dir_all(&dir);
+        crate::test_support::remove_dir_if_present(&dir);
         dir.join("talkie.md")
     }
 
@@ -338,7 +348,7 @@ mod tests {
         validate(path.to_str().unwrap()).expect("validate");
         let strays: Vec<_> = fs::read_dir(path.parent().unwrap())
             .expect("read dir")
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert!(strays.is_empty(), "left behind: {strays:?}");
@@ -373,9 +383,13 @@ mod tests {
         let parent = path.parent().expect("parent");
         let strays: Vec<_> = fs::read_dir(parent)
             .expect("read dir")
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.ends_with(".tmp"))
+            .filter(|name| {
+                Path::new(name)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp"))
+            })
             .collect();
         assert!(strays.is_empty(), "left behind: {strays:?}");
     }

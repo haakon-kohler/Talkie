@@ -8,6 +8,7 @@
 
 use serde::{de::DeserializeOwned, Serialize};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 
 #[wasm_bindgen]
 extern "C" {
@@ -36,9 +37,6 @@ pub fn current_window_label() -> String {
 }
 
 /// Call a command that takes arguments and returns a value.
-// First used in M1's model-download progress query. Kept complete so the shim stays
-// symmetric rather than growing a hole-shaped gap later.
-#[allow(dead_code)]
 pub async fn call<A: Serialize, R: DeserializeOwned>(cmd: &str, args: &A) -> Result<R, String> {
     let args = serde_wasm_bindgen::to_value(args).map_err(|e| e.to_string())?;
     let value = invoke(cmd, args).await.map_err(|e| describe(&e))?;
@@ -73,9 +71,8 @@ pub async fn fire(cmd: &str) -> Result<(), String> {
 /// Subscribe to a backend event for the lifetime of the window.
 ///
 /// The unlisten handle is intentionally dropped: every listener Talkie sets up
-/// lives as long as its window does.
-// First used in M1 (recorder state) and M2 (external file changes).
-#[allow(dead_code)]
+/// lives as long as its window does. A subscription Tauri refuses is reported
+/// on the console; there is no one else to tell.
 pub fn listen<T, F>(event: &'static str, mut on_event: F)
 where
     T: DeserializeOwned + 'static,
@@ -92,6 +89,13 @@ where
         }
     }) as Box<dyn FnMut(JsValue)>);
 
-    let _ = tauri_listen(event, handler.as_ref());
+    let subscribed = JsFuture::from(tauri_listen(event, handler.as_ref()));
     handler.forget();
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(e) = subscribed.await {
+            web_sys::console::error_1(
+                &format!("talkie: could not listen for {event}: {}", describe(&e)).into(),
+            );
+        }
+    });
 }

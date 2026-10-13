@@ -461,15 +461,18 @@ fn flush_on_blur(autosave: Autosave) {
         autosave.flush();
     }) as Box<dyn FnMut(web_sys::Event)>);
 
-    let _ = window.add_event_listener_with_callback("blur", handler.as_ref().unchecked_ref());
+    if let Err(e) =
+        window.add_event_listener_with_callback("blur", handler.as_ref().unchecked_ref())
+    {
+        web_sys::console::error_1(&format!("talkie: no save on blur: {e:?}").into());
+    }
     handler.forget();
 }
 
 fn prefers_dark() -> bool {
     web_sys::window()
         .and_then(|w| w.match_media("(prefers-color-scheme: dark)").ok().flatten())
-        .map(|mql| mql.matches())
-        .unwrap_or(false)
+        .is_some_and(|mql| mql.matches())
 }
 
 /// Page colors come from CSS; this only keeps CodeMirror's own internals (caret,
@@ -569,7 +572,7 @@ mod tests {
     fn nothing_unsaved_means_nothing_to_send() {
         let mut ledger = Ledger::default();
         assert_eq!(
-            ledger.begin_save(|| unreachable!("a clean ledger read the document")),
+            ledger.begin_save(|| panic!("a clean ledger read the document")),
             None
         );
     }

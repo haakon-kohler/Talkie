@@ -6,6 +6,9 @@ license.workspace = true
 authors.workspace = true
 description = "Talkie's Leptos (CSR) frontend, compiled to WASM by Trunk."
 
+[lints]
+workspace = true
+
 [dependencies]
 talkie-shared = { workspace = true }
 leptos = { version = "0.8", features = ["csr"] }

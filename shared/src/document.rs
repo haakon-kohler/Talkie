@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// The caller supplies the timestamp already formatted — this crate compiles to
 /// wasm as well as native, and a clock is not something it should own.
+#[must_use]
 pub fn format_entry(text: &str, timestamp: &str) -> String {
     format!("## {timestamp}\n{}\n", text.trim())
 }
@@ -50,6 +51,7 @@ pub fn format_entry(text: &str, timestamp: &str) -> String {
 ///
 /// Either way the result is a pure insertion that [`inserted_at_head`]
 /// recognises, which is what lets the editor's save carry a capture over.
+#[must_use]
 pub fn capture(text: &str, body: &str, timestamp: &str) -> String {
     let heading = format!("## {timestamp}");
     match top_heading(text) {
@@ -67,6 +69,7 @@ pub fn capture(text: &str, body: &str, timestamp: &str) -> String {
 }
 
 /// The trailing newline every version of the file ends with.
+#[must_use]
 pub fn normalized(text: &str) -> String {
     if text.is_empty() || text.ends_with('\n') {
         return text.to_string();
@@ -79,6 +82,7 @@ pub fn normalized(text: &str) -> String {
 /// that follow.
 ///
 /// For the ordinary file — one that is nothing but entries — this is 0.
+#[must_use]
 pub fn insertion_offset(text: &str) -> usize {
     let after_frontmatter = frontmatter_end(text);
 
@@ -117,6 +121,7 @@ pub fn insertion_offset(text: &str) -> usize {
 
 /// Put `entry` into `text` at the insertion point, with the blank-line
 /// separators the contract promises.
+#[must_use]
 pub fn splice(text: &str, entry: &str) -> String {
     let at = insertion_offset(text);
     let (head, tail) = text.split_at(at);
@@ -164,6 +169,7 @@ pub struct Inserted<'a> {
 /// Under the heading, what was inserted must also be a whole paragraph shaped
 /// the way [`capture`] writes one: that spot is the start of the top entry's
 /// text, where a hand edit is far likelier than at the insertion point.
+#[must_use]
 pub fn inserted_at_head<'a>(base: &'a str, newer: &'a str) -> Option<Inserted<'a>> {
     if newer.len() <= base.len() {
         return None;
@@ -178,7 +184,7 @@ pub fn inserted_at_head<'a>(base: &'a str, newer: &'a str) -> Option<Inserted<'a
     }
     let (heading, at) = top_heading(base)?;
     let text = inserted_at(base, newer, at)?;
-    (text == paragraph(text, &base[at..])).then_some(Inserted {
+    (text == paragraph(text, base.get(at..)?)).then_some(Inserted {
         at,
         text,
         under: Some(heading),
@@ -192,12 +198,13 @@ pub fn inserted_at_head<'a>(base: &'a str, newer: &'a str) -> Option<Inserted<'a
 /// `target` if `target` still opens with it, and otherwise brings the heading
 /// with it as a new entry — the heading may have been edited away, but the
 /// capture must not be.
+#[must_use]
 pub fn carry_over(target: &str, inserted: &Inserted) -> (usize, String) {
     let Some(heading) = inserted.under else {
         return (insertion_offset(target), inserted.text.to_string());
     };
     match top_heading(target) {
-        Some((top, at)) if top == heading => (at, paragraph(inserted.text, &target[at..])),
+        Some((top, at)) if top == heading => (at, paragraph(inserted.text, target.split_at(at).1)),
         _ => {
             let at = insertion_offset(target);
             let (head, tail) = target.split_at(at);
@@ -235,6 +242,7 @@ pub enum Save {
 /// the editor may be open with unsaved edits*. Losing one of those to the other
 /// is the single worst thing this app could do, so a capture is carried over
 /// rather than overwritten, and anything less clear-cut refuses.
+#[must_use]
 pub fn reconcile(incoming: &str, on_disk: &str, base: Option<&str>) -> Save {
     let incoming = normalized(incoming);
 
@@ -264,12 +272,7 @@ pub fn reconcile(incoming: &str, on_disk: &str, base: Option<&str>) -> Save {
 /// `base` with something inserted at `at`.
 fn inserted_at<'a>(base: &str, newer: &'a str, at: usize) -> Option<&'a str> {
     let (head, tail) = base.split_at(at);
-    if !newer.starts_with(head) || !newer.ends_with(tail) {
-        return None;
-    }
-    let rest = &newer[head.len()..];
-    let inserted_len = rest.len().checked_sub(tail.len())?;
-    let inserted = &rest[..inserted_len];
+    let inserted = newer.strip_prefix(head)?.strip_suffix(tail)?;
     debug_assert_eq!(
         newer.len(),
         base.len() + inserted.len(),
@@ -338,11 +341,8 @@ fn line_at(text: &str, from: usize) -> &str {
         text.is_char_boundary(from),
         "line offset {from} splits a character"
     );
-    let rest = &text[from..];
-    match rest.find('\n') {
-        Some(end) => &rest[..=end],
-        None => rest,
-    }
+    let (_, rest) = text.split_at(from);
+    rest.split_inclusive('\n').next().unwrap_or(rest)
 }
 
 #[cfg(test)]
@@ -658,6 +658,42 @@ mod tests {
             assert_eq!(at, inserted.at, "base: {base:?}");
             assert_eq!(text, inserted.text, "base: {base:?}");
         }
+    }
+
+    /// Every offset in this module is counted in bytes, and transcripts are
+    /// not ASCII. A title, a heading and captures full of multi-byte
+    /// characters must still split on whole lines, be recognised as captures,
+    /// and carry over intact — the paths the `string_slice` lint guards.
+    #[test]
+    fn multi_byte_text_splits_on_whole_lines() {
+        let base =
+            "---\ntags: [blåbær]\n---\n\n# Tålkie — 🎙\n\n## 2026-08-18 09:14\nFørst, ünïcödé ✓\n";
+        let newer = capture(base, "Andre — 二番目 🎧", "2026-08-18 09:14");
+        assert_eq!(
+            newer,
+            "---\ntags: [blåbær]\n---\n\n# Tålkie — 🎙\n\n## 2026-08-18 09:14\nAndre — 二番目 🎧\n\nFørst, ünïcödé ✓\n"
+        );
+
+        let inserted = inserted_at_head(base, &newer).expect("not recognised");
+        assert_eq!(inserted.text, "Andre — 二番目 🎧\n\n");
+        assert_eq!(
+            carry_over(base, &inserted),
+            (inserted.at, inserted.text.to_string())
+        );
+
+        let incoming =
+            "---\ntags: [blåbær]\n---\n\n# Tålkie — 🎙\n\n## 2026-08-18 09:14\nFørst, redigert ✓\n";
+        assert_eq!(
+            reconcile(incoming, &newer, Some(base)),
+            Save::Write(
+                "---\ntags: [blåbær]\n---\n\n# Tålkie — 🎙\n\n## 2026-08-18 09:14\nAndre — 二番目 🎧\n\nFørst, redigert ✓\n"
+                    .to_string()
+            )
+        );
+
+        let next_minute = capture(&newer, "Tredje 🗣", "2026-08-18 09:15");
+        assert!(next_minute
+            .contains("# Tålkie — 🎙\n\n## 2026-08-18 09:15\nTredje 🗣\n\n## 2026-08-18 09:14\n"));
     }
 
     #[test]

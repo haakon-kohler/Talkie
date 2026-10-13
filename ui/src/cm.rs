@@ -81,8 +81,7 @@ impl Editor {
         let doc = self.doc();
         let position = doc
             .get(..byte_offset)
-            .map(|head| head.encode_utf16().count())
-            .unwrap_or(0);
+            .map_or(0, |head| head.encode_utf16().count());
         cm_insert_and_reveal(&self.view, position, text);
     }
 

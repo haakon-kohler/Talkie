@@ -17,7 +17,7 @@ fn main() {
     console_error_panic_hook::set_once();
 
     let label = WindowLabel::parse(&ipc::current_window_label());
-    mount_to_body(move || view! { <Root label=label /> })
+    mount_to_body(move || view! { <Root label=label /> });
 }
 
 #[component]
