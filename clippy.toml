@@ -5,3 +5,7 @@ allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
 allow-dbg-in-tests = true
+
+# Product names, not code, so doc_markdown should not ask for backticks. ".."
+# keeps clippy's own list (macOS, GitHub, WebAssembly, …).
+doc-valid-idents = ["CodeMirror", "FSEvents", "WindowServer", ".."]

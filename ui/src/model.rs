@@ -124,6 +124,10 @@ fn ProgressBar(progress: RwSignal<Option<ModelProgress>>) -> impl IntoView {
             // COPY: onboarding.model.unpacking
             return "Unpacking…".to_string();
         }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "shown as whole megabytes; f64 is exact far past any model size"
+        )]
         let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
         match p.total_bytes {
             Some(total) => format!("{:.0} of {:.0} MB", mb(p.downloaded_bytes), mb(total)),
