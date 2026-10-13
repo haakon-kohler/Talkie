@@ -3,8 +3,12 @@
 //! The UI has no store of its own: it reads through `get_settings` and writes
 //! through `set_settings`, and every write is persisted before it is announced.
 
+use std::fs;
+use std::io::ErrorKind;
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
+use anyhow::{anyhow, Context, Result};
 use talkie_shared::Settings;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
@@ -71,9 +75,7 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> Settings {
         .and_then(|value| serde_json::from_value::<Settings>(value).ok())
         .unwrap_or_default();
 
-    if settings.note_path.trim().is_empty() {
-        settings.note_path = default_note_path();
-    }
+    settings.note_path = note_path_or_default(settings.note_path);
     settings.launch_at_login = crate::login_item::enabled();
 
     // A fresh install has nothing to migrate; its first save stamps the schema.
@@ -84,6 +86,43 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> Settings {
         }
     }
     settings
+}
+
+/// The stored notes path, or the default when none was ever chosen.
+fn note_path_or_default(note_path: String) -> String {
+    if note_path.trim().is_empty() {
+        default_note_path()
+    } else {
+        note_path
+    }
+}
+
+/// The notes path a running Talkie would write to, read straight from the
+/// store file in `data_dir`.
+///
+/// This is for `Talkie capture`, which runs with no app and so no store
+/// plugin. A missing store is a fresh install, which writes to the default
+/// path. A store that is there but cannot be read is an error, never a
+/// quiet fall back to the default: that would put the capture in a file
+/// nobody is looking at.
+pub fn stored_note_path(data_dir: &Path) -> Result<String> {
+    let path = data_dir.join(STORE_FILE);
+    let settings = match fs::read(&path) {
+        Ok(bytes) => {
+            let mut store: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_slice(&bytes)
+                    .with_context(|| format!("{} is not a settings store", path.display()))?;
+            match store.remove(KEY) {
+                Some(blob) => serde_json::from_value::<Settings>(blob)
+                    .with_context(|| format!("the settings in {} do not parse", path.display()))?,
+                // The store exists but nothing was ever saved into it.
+                None => Settings::default(),
+            }
+        }
+        Err(e) if e.kind() == ErrorKind::NotFound => Settings::default(),
+        Err(e) => return Err(anyhow!(e).context(format!("could not read {}", path.display()))),
+    };
+    Ok(note_path_or_default(settings.note_path))
 }
 
 /// Bring a blob written under schema `from` up to `SCHEMA`.
@@ -107,6 +146,55 @@ pub fn save<R: Runtime>(app: &AppHandle<R>, settings: &Settings) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scratch app-data directory holding `store` as its settings file,
+    /// or no settings file at all.
+    fn data_dir_with(name: &str, store: Option<&str>) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("talkie-settings-{name}-{}", std::process::id()));
+        crate::test_support::remove_dir_if_present(&dir);
+        fs::create_dir_all(&dir).expect("scratch dir");
+        if let Some(store) = store {
+            fs::write(dir.join(STORE_FILE), store).expect("seed store");
+        }
+        dir
+    }
+
+    #[test]
+    fn the_stored_note_path_is_the_one_in_the_store() {
+        let dir = data_dir_with(
+            "chosen",
+            Some(r#"{ "schema": 1, "settings": { "note_path": "/vault/talkie.md" } }"#),
+        );
+        assert_eq!(stored_note_path(&dir).unwrap(), "/vault/talkie.md");
+        crate::test_support::remove_dir_if_present(&dir);
+    }
+
+    #[test]
+    fn no_store_or_no_choice_means_the_default_path() {
+        let missing = data_dir_with("missing", None);
+        assert_eq!(stored_note_path(&missing).unwrap(), default_note_path());
+        crate::test_support::remove_dir_if_present(&missing);
+
+        let blank = data_dir_with("blank", Some(r#"{ "settings": { "note_path": "  " } }"#));
+        assert_eq!(stored_note_path(&blank).unwrap(), default_note_path());
+        crate::test_support::remove_dir_if_present(&blank);
+
+        let unsaved = data_dir_with("unsaved", Some("{}"));
+        assert_eq!(stored_note_path(&unsaved).unwrap(), default_note_path());
+        crate::test_support::remove_dir_if_present(&unsaved);
+    }
+
+    #[test]
+    fn an_unreadable_store_is_an_error_not_the_default() {
+        let torn = data_dir_with("torn", Some(r#"{ "settings": { "note_pa"#));
+        assert!(stored_note_path(&torn).is_err());
+        crate::test_support::remove_dir_if_present(&torn);
+
+        let wrong = data_dir_with("wrong", Some(r#"{ "settings": { "note_path": 7 } }"#));
+        assert!(stored_note_path(&wrong).is_err());
+        crate::test_support::remove_dir_if_present(&wrong);
+    }
 
     #[test]
     fn schema_zero_takes_the_push_to_talk_default() {

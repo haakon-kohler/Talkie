@@ -273,6 +273,11 @@ every file written in the old order is one more file with a seam in it.
       Chosen over in-process plugins so nothing loads at launch and a first
       plugin is a shell script; Lua for UI surfaces waits until hooks prove
       insufficient.
+- [x] **The pipeline from a terminal.** `Talkie transcribe <file.wav>` prints
+      what a capture would hear; `Talkie capture --wav <file> | --text <text>`
+      runs the rest of it — hooks, the write — into the notes file or
+      `--note <path>` (`src-tauri/src/cli.rs`). For testing hooks and whatever
+      watches the file without speaking, and for debugging the capture path.
 - [x] File location picker — AppKit's own `NSOpenPanel`, no dialog plugin
 - [x] Microphone picker
 - [ ] Model idle-unload timer
@@ -330,6 +335,25 @@ every file written in the old order is one more file with a seam in it.
   that took the audio lock before the start worker did found nothing to stop,
   and the worker then began a recording nobody would end. The worker now
   checks the state after starting and ends the capture itself.
+
+- The command line is answered before the Tauri builder, like `--debug-log`,
+  so it never takes the single-instance socket and never installs the event
+  tap; it runs beside a live Talkie, which sees its writes the way it sees
+  Obsidian's. Audio comes from a WAV file only. A microphone from a terminal
+  would put the grant on the terminal (the `cargo tauri dev` problem), and a
+  file is what a test wants anyway. The file goes through the same resampler,
+  voice detector and cap as the microphone's audio — `audio_toolkit::process`
+  feeds the consumer's own frame handling — so `transcribe` hears what a
+  capture would, not a cleaner version of it. To get there, `hooks` and
+  `models` take the app-data directory instead of an `AppHandle`, and the
+  write-and-hooks tail of a capture is one function, `recorder::land`, shared
+  by both.
+- `capture` waits for `after-capture` before it exits; the app does not. A
+  script that runs a capture can count on its side effects being done.
+- Without `--note`, the path is read from `settings.json` directly. A store
+  that exists but does not parse is an error, not the default path: the app
+  falls back to defaults there, but a capture from a script landing in a file
+  nobody is looking at is worse than a refusal.
 
 ## M4 — Shippable
 

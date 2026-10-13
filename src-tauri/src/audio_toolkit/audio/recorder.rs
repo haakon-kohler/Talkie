@@ -35,6 +35,9 @@ enum AudioChunk {
 
 type Detector = Arc<Mutex<Box<dyn VoiceActivityDetector>>>;
 
+/// The frame the resampler cuts its output into, and the frame Silero judges.
+const FRAME: Duration = Duration::from_millis(30);
+
 /// The last stream config a device accepted, by device name.
 type ConfigCache = Arc<Mutex<Option<(String, cpal::SupportedStreamConfig)>>>;
 
@@ -516,6 +519,37 @@ fn handle_frame(samples: &[f32], recording: bool, vad: Option<&Detector>, out_bu
     out_buf.extend(kept.iter().take(room));
 }
 
+/// Run audio that is already in memory through what a live capture runs it
+/// through: the resampler, the detector, and the capture cap.
+///
+/// `samples` are mono at `in_sample_rate`. What comes back is 16 kHz speech,
+/// exactly what `stop` would have handed over had the same sound come in
+/// through the microphone — the frames are cut the same way whatever size
+/// the input arrives in, so feeding it all at once changes nothing.
+pub fn process(
+    samples: &[f32],
+    in_sample_rate: u32,
+    vad: Option<Box<dyn VoiceActivityDetector>>,
+) -> Vec<f32> {
+    debug_assert!(in_sample_rate > 0, "audio cannot run at 0 Hz");
+    let vad = vad.map(|detector| Arc::new(Mutex::new(detector)));
+    let mut resampler = FrameResampler::new(
+        in_sample_rate as usize,
+        constants::SAMPLE_RATE as usize,
+        FRAME,
+    );
+    let mut speech = Vec::new();
+    resampler.push(samples, |frame: &[f32]| {
+        handle_frame(frame, true, vad.as_ref(), &mut speech);
+    });
+    resampler.finish(|frame: &[f32]| {
+        handle_frame(frame, true, vad.as_ref(), &mut speech);
+    });
+    // The one sample past the cap is the "warned already" mark.
+    speech.truncate(constants::MAX_CAPTURE_SAMPLES);
+    speech
+}
+
 fn run_consumer(
     in_sample_rate: u32,
     vad: Option<&Detector>,
@@ -527,7 +561,7 @@ fn run_consumer(
     let mut frame_resampler = FrameResampler::new(
         in_sample_rate as usize,
         constants::SAMPLE_RATE as usize,
-        Duration::from_millis(30),
+        FRAME,
     );
 
     let mut processed_samples = Vec::<f32>::new();

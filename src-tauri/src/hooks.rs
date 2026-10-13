@@ -17,10 +17,11 @@
 //!   running past [`FILTER_TIMEOUT`] keeps the original transcript, so a broken
 //!   filter can never lose what was said.
 //! - `after-capture` runs once the entry is in the file. It gets the text that
-//!   was written on stdin and its exit status is only logged. Talkie waits on
+//!   was written on stdin and its exit status is only logged. The app waits on
 //!   it in the background, not in the capture path, so it may take as long as
 //!   it likes; a hook that hands off to something long-running should still
-//!   detach that work rather than sit on it.
+//!   detach that work rather than sit on it. `Talkie capture` on the command
+//!   line does wait for it, so a script that runs one knows the hook is done.
 //!
 //! Both get the resolved note path in `TALKIE_NOTE`. Their stderr is captured
 //! and logged, because a bundled app's own stderr goes nowhere.
@@ -33,11 +34,10 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use tauri::{AppHandle, Manager};
 
 /// The hook that filters a transcript before it is written.
 const ON_CAPTURE: &str = "on-capture";
@@ -50,13 +50,9 @@ const AFTER_CAPTURE: &str = "after-capture";
 pub const FILTER_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// `<app-data>/hooks`, created on demand so it is there to be found.
-pub fn dir(app: &AppHandle) -> Result<PathBuf> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .context("no app data directory")?
-        .join("hooks");
-    fs::create_dir_all(&dir)?;
+pub fn dir(data_dir: &Path) -> Result<PathBuf> {
+    let dir = data_dir.join("hooks");
+    fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
     Ok(dir)
 }
 
@@ -65,11 +61,11 @@ pub fn dir(app: &AppHandle) -> Result<PathBuf> {
 /// Returns the text to write, or `None` when the hook chose to drop the
 /// capture. Without a hook the text comes back untouched. An empty transcript
 /// is not a capture and is not offered to the hook.
-pub fn on_capture(app: &AppHandle, note: &Path, text: &str) -> Option<String> {
+pub fn on_capture(data_dir: &Path, note: &Path, text: &str) -> Option<String> {
     if text.trim().is_empty() {
         return Some(text.to_owned());
     }
-    let Some(hook) = find(app, ON_CAPTURE) else {
+    let Some(hook) = find(data_dir, ON_CAPTURE) else {
         return Some(text.to_owned());
     };
 
@@ -96,20 +92,22 @@ pub fn on_capture(app: &AppHandle, note: &Path, text: &str) -> Option<String> {
 }
 
 /// Tell `after-capture`, if there is one, what was just written. Returns at
-/// once; the hook is waited on and reported from a background thread.
-pub fn after_capture(app: &AppHandle, note: &Path, text: &str) {
-    let Some(hook) = find(app, AFTER_CAPTURE) else {
-        return;
-    };
+/// once; the hook is waited on and reported from a background thread, whose
+/// handle comes back so a caller about to exit can wait for it. Dropping the
+/// handle leaves the hook to finish on its own.
+pub fn after_capture(data_dir: &Path, note: &Path, text: &str) -> Option<JoinHandle<()>> {
+    let hook = find(data_dir, AFTER_CAPTURE)?;
     let note = note.to_owned();
     let text = text.to_owned();
-    thread::spawn(move || match run(&hook, &note, &text, None) {
-        Ok(Outcome { status, .. }) if status.success() => {}
-        Ok(Outcome { status, .. }) => {
-            log::warn!("talkie: {AFTER_CAPTURE} exited with {status}");
+    Some(thread::spawn(move || {
+        match run(&hook, &note, &text, None) {
+            Ok(Outcome { status, .. }) if status.success() => {}
+            Ok(Outcome { status, .. }) => {
+                log::warn!("talkie: {AFTER_CAPTURE} exited with {status}");
+            }
+            Err(e) => log::warn!("talkie: {AFTER_CAPTURE} failed: {e:#}"),
         }
-        Err(e) => log::warn!("talkie: {AFTER_CAPTURE} failed: {e:#}"),
-    });
+    }))
 }
 
 /// The hook file for `name`, if one is installed and runnable.
@@ -117,8 +115,8 @@ pub fn after_capture(app: &AppHandle, note: &Path, text: &str) {
 /// A file that exists but lacks the executable bit is the one mistake every
 /// first-time hook author makes, so it is called out by name rather than
 /// silently skipped.
-fn find(app: &AppHandle, name: &str) -> Option<PathBuf> {
-    let dir = match dir(app) {
+fn find(data_dir: &Path, name: &str) -> Option<PathBuf> {
+    let dir = match dir(data_dir) {
         Ok(dir) => dir,
         Err(e) => {
             log::warn!("talkie: no hooks directory: {e:#}");
