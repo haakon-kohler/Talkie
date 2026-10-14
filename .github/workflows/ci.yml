@@ -1,0 +1,49 @@
+# The checks AGENTS.md asks for before a commit, run on a Mac.
+#
+# macOS on purpose: login_item.rs, panel.rs, the event-tap half of
+# shortcut.rs and windows.rs only compile against the macOS SDK, so a Linux
+# runner would lint the stand-ins and miss the code that ships.
+name: CI
+
+on:
+  pull_request:
+    branches: [main, nightly]
+  push:
+    branches: [main, nightly]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      # rust-toolchain.toml pins the exact release and the wasm target.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `generate_context!` wants `frontendDist` to exist; the checks never
+      # build the UI into it, so an empty one stands in.
+      - name: Stand in for the UI build
+        run: mkdir -p dist
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy (host, shared, UI)
+        run: cargo clippy --workspace --all-targets
+
+      - name: Clippy (UI as wasm)
+        run: cargo clippy -p talkie-ui --all-targets --target wasm32-unknown-unknown
+
+      - name: Test
+        run: cargo test --workspace
