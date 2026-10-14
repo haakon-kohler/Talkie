@@ -89,7 +89,12 @@ pub fn handle(package: &PackageInfo, data_dir: &Path) -> Option<ExitCode> {
         eprintln!("talkie: warnings will not be shown: {e}");
     }
 
-    match execute(command, package, data_dir) {
+    // Where the bundled VAD lives: `Contents/Resources` in a bundle, beside
+    // the binary in a cargo build. Resolved here, from the package, so
+    // nothing below needs Tauri's context.
+    let resources = tauri::utils::platform::resource_dir(package, &tauri::Env::default())
+        .context("could not find the bundled resources");
+    match resources.and_then(|resource_dir| execute(command, data_dir, &resource_dir)) {
         Ok(()) => Some(ExitCode::SUCCESS),
         Err(e) => {
             eprintln!("talkie: {e:#}");
@@ -155,9 +160,9 @@ fn parse_capture(rest: &[OsString]) -> Result<Command, String> {
     Ok(Command::Capture { source, note })
 }
 
-fn execute(command: Command, package: &PackageInfo, data_dir: &Path) -> Result<()> {
+fn execute(command: Command, data_dir: &Path, resource_dir: &Path) -> Result<()> {
     match command {
-        Command::Transcribe { wav } => match hear(&wav, package, data_dir)? {
+        Command::Transcribe { wav } => match hear(&wav, data_dir, resource_dir)? {
             Some(text) => println!("{text}"),
             None => eprintln!("talkie: no speech in {}", wav.display()),
         },
@@ -172,7 +177,7 @@ fn execute(command: Command, package: &PackageInfo, data_dir: &Path) -> Result<(
             let text = match source {
                 Source::Text(text) => text,
                 Source::Wav(wav) => {
-                    let Some(text) = hear(&wav, package, data_dir)? else {
+                    let Some(text) = hear(&wav, data_dir, resource_dir)? else {
                         eprintln!("talkie: no speech in {}; nothing written", wav.display());
                         return Ok(());
                     };
@@ -205,7 +210,7 @@ fn execute(command: Command, package: &PackageInfo, data_dir: &Path) -> Result<(
 ///
 /// `None` when there is no speech in it worth a model run: what the app drops
 /// as a slip of the finger, or a transcript that comes back empty.
-fn hear(wav: &Path, package: &PackageInfo, data_dir: &Path) -> Result<Option<String>> {
+fn hear(wav: &Path, data_dir: &Path, resource_dir: &Path) -> Result<Option<String>> {
     // Checked before decoding: without the model, detecting voice in a long
     // file is work for nothing.
     if models::status(data_dir) != ModelStatus::Ready {
@@ -214,9 +219,7 @@ fn hear(wav: &Path, package: &PackageInfo, data_dir: &Path) -> Result<Option<Str
             data_dir.display()
         );
     }
-    let resource_dir = tauri::utils::platform::resource_dir(package, &tauri::Env::default())
-        .context("could not find the bundled resources")?;
-    let detector = recorder::voice_detector(&models::vad_path(&resource_dir))?;
+    let detector = recorder::voice_detector(&models::vad_path(resource_dir))?;
 
     let (samples, sample_rate) = read_wav(wav)?;
     let speech = audio_toolkit::process(&samples, sample_rate, Some(detector));
@@ -272,11 +275,6 @@ mod tests {
 
     fn args(v: &[&str]) -> Vec<OsString> {
         v.iter().map(OsString::from).collect()
-    }
-
-    fn package() -> PackageInfo {
-        let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
-        context.package_info().clone()
     }
 
     fn scratch(name: &str) -> PathBuf {
@@ -389,14 +387,13 @@ mod tests {
         let dir = scratch("text");
         let note = dir.join("talkie.md");
         std::fs::write(&note, "# Notes\n").expect("seed");
-        let package = package();
 
         execute(
             Command::Capture {
                 source: Source::Text("hello from a script".to_owned()),
                 note: Some(note.clone()),
             },
-            &package,
+            &dir,
             &dir,
         )
         .expect("capture");
@@ -417,12 +414,11 @@ mod tests {
     #[test]
     fn hearing_without_the_model_says_so() {
         let dir = scratch("no-model");
-        let package = package();
         let error = execute(
             Command::Transcribe {
                 wav: dir.join("any.wav"),
             },
-            &package,
+            &dir,
             &dir,
         )
         .expect_err("no model");
