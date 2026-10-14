@@ -333,4 +333,20 @@ every file written in the old order is one more file with a seam in it.
 
 ## M4 — Shippable
 
-Not started.
+- [x] **Two channels, stable and nightly, the way T3 Code runs them.** Work
+      lands on `nightly`, and every push there publishes Talkie Nightly as a
+      prerelease. `main` is stable, moves only by fast-forward to something
+      nightly has already shipped, and releases on a `vX.Y.Z` tag. Nightly is
+      the same code built with `tauri.nightly.conf.json`: its own name,
+      identifier and inverted icon, so both install side by side. CI runs the
+      lints and tests on a Mac, which is the first time anything but the Mac
+      on the desk has compiled the macOS code.
+
+### M4 notes
+
+- The nightly `icon.icns` and `icon.ico` were packed on Linux, where there is
+  no `iconutil`, with the same entries and order as the stable ones (PNG
+  payloads throughout). Regenerating them on the Mac with `iconutil` is fine.
+- Both channels are ad-hoc signed and not notarized, so a downloaded copy
+  needs "Open Anyway" once in Privacy & Security, and its grants still die on
+  every update until there is a Developer ID.

@@ -6,6 +6,19 @@ Set up one shortcut to immediately transcribe notes to a markdown file. It can b
 
 ![Talkie's editor, newest capture first](docs/editor.png)
 
+## Stable and Nightly
+
+Talkie comes in two channels, installable side by side:
+
+- **Talkie** — the stable release. [Latest release](https://github.com/haakon-kohler/Talkie/releases/latest).
+- **Talkie Nightly** — the newest features first, with the inverted icon.
+  Published from the `nightly` branch on every change; look for the
+  prereleases on the [releases page](https://github.com/haakon-kohler/Talkie/releases).
+
+Each keeps its own settings, model and permissions. Both write to
+`~/Documents/Talkie/talkie.md` unless told otherwise, so give them different
+shortcuts if you run both at once.
+
 ## Running it
 
 Requires [Rust](https://rustup.rs/) (via rustup) and
@@ -15,7 +28,9 @@ Requires [Rust](https://rustup.rs/) (via rustup) and
 cargo tauri dev
 ```
 
-`cargo tauri build` produces the `.app`/`.dmg`.
+`cargo tauri build` produces the `.app`/`.dmg`. Add
+`--config src-tauri/tauri.nightly.conf.json` to either command for Talkie
+Nightly.
 
 
 # About

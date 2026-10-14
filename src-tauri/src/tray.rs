@@ -27,7 +27,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<()> {
     let open_notes = MenuItem::with_id(app, ID_OPEN_NOTES, "Notepad", true, None::<&str>)?;
     let record = MenuItem::with_id(app, ID_RECORD, "Record", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, ID_QUIT, "Quit Talkie", true, None::<&str>)?;
+    // The product name, so a nightly build says "Talkie Nightly" wherever
+    // stable says "Talkie" and the two can be told apart in the menu bar.
+    let name = &app.package_info().name;
+    let quit = MenuItem::with_id(app, ID_QUIT, format!("Quit {name}"), true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
@@ -44,7 +47,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<()> {
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon(RecorderState::Idle))
         .icon_as_template(true)
-        .tooltip("Talkie")
+        .tooltip(name)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -94,10 +97,11 @@ pub fn set_state<R: Runtime>(app: &AppHandle<R>, state: RecorderState) {
         return;
     };
 
+    let name = &app.package_info().name;
     let tooltip = match state {
-        RecorderState::Idle => "Talkie",
-        RecorderState::Recording => "Talkie — recording",
-        RecorderState::Transcribing => "Talkie — transcribing",
+        RecorderState::Idle => name.clone(),
+        RecorderState::Recording => format!("{name} — recording"),
+        RecorderState::Transcribing => format!("{name} — transcribing"),
     };
     let updates = [
         TrayIcon::set_tooltip(&tray, Some(tooltip)),

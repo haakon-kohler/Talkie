@@ -11,7 +11,11 @@ nothing renders them during a build.
 | `app-icon-small.svg` | The same icon without the seams, for 64 px and under, where a seam would be under a pixel wide and only look muddy. |
 | `tray*.svg` | Menu-bar template images at 27 × 36 px, i.e. 18 pt tall at @2x, which is the height the tray scales to. Every straight edge sits on a whole pixel. The gap between the halves is wider than in the artwork, which closes up at this size, and there are no seams. `-recording` adds a dot in the right-hand bowl, `-transcribing` a ring. |
 
-Ink is `#121826`. The tray files are pure black on clear, because
+Ink is `#121826`. `app-icon-nightly.svg` and `app-icon-small-nightly.svg` are
+the same two icons inverted for Talkie Nightly: the tile takes the ink, the
+mark goes white. They render into `icons/nightly/` with the same commands, and
+only the five files `tauri.nightly.conf.json` lists; the tray icons are
+template images and look the same in both channels. The tray files are pure black on clear, because
 `icon_as_template(true)` lets macOS tint them.
 
 ## Regenerating
