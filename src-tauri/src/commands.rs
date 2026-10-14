@@ -129,7 +129,10 @@ pub fn hide_window(app: AppHandle, label: WindowLabel) -> Result<(), String> {
     reason = "a Tauri command owns its arguments"
 )]
 pub fn get_model_status(app: AppHandle) -> ModelStatus {
-    models::status(&app)
+    // Without an app-data directory there is nowhere a model could be.
+    app.path()
+        .app_data_dir()
+        .map_or(ModelStatus::Missing, |dir| models::status(&dir))
 }
 
 /// Fetch the speech model. Progress arrives as `MODEL_PROGRESS` events rather

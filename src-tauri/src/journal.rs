@@ -96,7 +96,9 @@ pub fn init(data_dir: &Path) {
 /// This runs before the Tauri builder, so the second process never reaches
 /// the single-instance socket — it reads the file the running one wrote.
 pub fn handle_flag(data_dir: &Path) -> bool {
-    if !std::env::args().skip(1).any(|arg| arg == FLAG) {
+    // `args_os`: `args` panics on an argument that is not UTF-8, and a file
+    // path handed to `Talkie capture` may be one.
+    if !std::env::args_os().skip(1).any(|arg| arg == FLAG) {
         return false;
     }
     let lines = load(&data_dir.join(FILE));

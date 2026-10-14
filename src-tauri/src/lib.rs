@@ -5,6 +5,7 @@
 //! is the assembly point while the pipeline itself arrives in M1.
 
 mod audio_toolkit;
+mod cli;
 mod commands;
 mod hooks;
 mod journal;
@@ -23,20 +24,23 @@ mod tray;
 mod watcher;
 mod windows;
 
+use std::process::ExitCode;
 use std::sync::Arc;
 
 use settings::SettingsState;
 use talkie_shared::WindowLabel;
 use tauri::{AppHandle, Manager, WindowEvent};
 
-/// Start Talkie and run until it quits.
+/// Start Talkie and run until it quits, or answer a command-line command
+/// (`--debug-log`, `transcribe`, `capture`) and leave. Returns the exit code.
 ///
 /// # Panics
 ///
 /// When Tauri cannot start: there is no app yet to report the failure through,
 /// and the journal records the panic.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+#[must_use]
+pub fn run() -> ExitCode {
     let context = tauri::generate_context!();
     // The journal needs app-data before any app exists, so derive it the way
     // Tauri's `app_data_dir` does: the platform data dir plus the identifier.
@@ -47,7 +51,14 @@ pub fn run() {
     // `Talkie --debug-log` prints the last ten problems and leaves, before
     // the single-instance guard could hand this launch to a running Talkie.
     if journal::handle_flag(&data_dir) {
-        return;
+        return ExitCode::SUCCESS;
+    }
+
+    // `Talkie transcribe` and `Talkie capture` run the pipeline from a
+    // terminal, also before the guard, and never reach the app below: no
+    // window, no tray, and no event tap.
+    if let Some(code) = cli::handle(context.package_info(), &data_dir) {
+        return code;
     }
 
     // Every failure path reports through `log`; the journal keeps the last
@@ -92,7 +103,13 @@ pub fn run() {
             let first_run = !settings.onboarding_complete;
             commands::manage_settings(&handle, settings);
 
-            handle.manage(Arc::new(recorder::Recorder::new(handle.clone())));
+            let data_dir = handle.path().app_data_dir()?;
+            let vad_path = models::vad_path(&handle.path().resource_dir()?);
+            handle.manage(Arc::new(recorder::Recorder::new(
+                handle.clone(),
+                data_dir,
+                vad_path,
+            )));
 
             tray::build(&handle)?;
 
@@ -141,6 +158,7 @@ pub fn run() {
         })
         .run(context)
         .expect("error while running Talkie");
+    ExitCode::SUCCESS
 }
 
 /// The running instance's side of a second launch.

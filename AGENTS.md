@@ -82,6 +82,7 @@ src-tauri/src/
   panel.rs          the native NSOpenPanel behind the notes-file field; a folder means talkie.md inside it
   hooks.rs          the plugin system: executables in app-data/hooks/, run at the edges of a capture
   journal.rs        the last ten warnings and panics, in app-data/debug.log; `Talkie --debug-log` prints it
+  cli.rs            `Talkie transcribe` / `Talkie capture`: the pipeline from a terminal, no app
   login_item.rs     Start at Login via SMAppService; macOS, not the store, is the truth for that switch
   watcher.rs        watches talkie.md for changes Talkie's editor did not make
   settings.rs       tauri-plugin-store; the host owns settings, the UI never caches them
@@ -209,6 +210,18 @@ Nightly** carries what is new, and anyone can install either or both.
   is answered before the single-instance guard, so it works while Talkie is
   running. `open --args` will not show it; it needs a terminal. There is no
   UI for it and there should not be one.
+- **`Talkie transcribe` and `Talkie capture` run the pipeline with no app.**
+  `transcribe <file.wav>` prints the transcript; `capture --wav <file>` or
+  `capture --text <text>` goes on through the hooks into the notes file, or
+  into `--note <path>`. Use them to test a hook, an agent watching the file, or
+  the capture path itself without speaking. Like `--debug-log` they are
+  answered before the single-instance guard, so they run beside a live Talkie
+  and never install the event tap — keep anything added there that way, and
+  keep the microphone out of it: a terminal cannot hold the grant. The model
+  has to be installed already. They read the app-data directory of the
+  identifier they were built with, so Talkie Nightly's binary uses Nightly's
+  settings, model and hooks. On Linux, `XDG_DATA_HOME=/tmp/x` gives them a
+  scratch app-data directory instead of the real one.
 - **`data-wasm-opt-params` in `ui/index.html` is load-bearing.** Release builds
   only: `wasm-opt` 123 validates its input against MVP unless told otherwise and
   rejects wasm-bindgen's `memory.copy` with `Fatal: error validating input`. The

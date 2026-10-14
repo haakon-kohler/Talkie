@@ -6,6 +6,10 @@
 //!
 //! The Silero VAD model does not live here: it is 1.7 MB and ships inside the
 //! bundle as a Tauri resource, which keeps first run to a single download.
+//!
+//! The paths take the app-data and resource directories rather than an app,
+//! because `Talkie transcribe` and `Talkie capture` need them with no app
+//! running.
 
 use std::fs;
 use std::io::Write;
@@ -29,33 +33,26 @@ const MODEL_DIR_NAME: &str = "parakeet-tdt-0.6b-v3-int8";
 const MODEL_SENTINEL: &str = "encoder-model.int8.onnx";
 
 /// `<app-data>/models`, created on demand.
-pub fn models_dir(app: &AppHandle) -> Result<PathBuf> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .context("no app data directory")?
-        .join("models");
-    fs::create_dir_all(&dir)?;
+pub fn models_dir(data_dir: &Path) -> Result<PathBuf> {
+    let dir = data_dir.join("models");
+    fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
     Ok(dir)
 }
 
 /// Where `ParakeetModel::load` is pointed.
-pub fn model_path(app: &AppHandle) -> Result<PathBuf> {
-    Ok(models_dir(app)?.join(MODEL_DIR_NAME))
+pub fn model_path(data_dir: &Path) -> Result<PathBuf> {
+    Ok(models_dir(data_dir)?.join(MODEL_DIR_NAME))
 }
 
-/// The Silero VAD weights that ship in the bundle.
-pub fn vad_path(app: &AppHandle) -> Result<PathBuf> {
-    app.path()
-        .resolve(
-            "resources/models/silero_vad_v4.onnx",
-            tauri::path::BaseDirectory::Resource,
-        )
-        .context("could not resolve the bundled VAD model")
+/// The Silero VAD weights that ship in the bundle, under its resource
+/// directory — what Tauri's `BaseDirectory::Resource` resolves against.
+pub fn vad_path(resource_dir: &Path) -> PathBuf {
+    resource_dir.join("resources/models/silero_vad_v4.onnx")
 }
 
-pub fn status(app: &AppHandle) -> ModelStatus {
-    match model_path(app) {
+/// Whether the speech model is unpacked and complete under `data_dir`.
+pub fn status(data_dir: &Path) -> ModelStatus {
+    match model_path(data_dir) {
         Ok(dir) if dir.join(MODEL_SENTINEL).is_file() => ModelStatus::Ready,
         _ => ModelStatus::Missing,
     }
@@ -88,7 +85,8 @@ pub async fn download(app: AppHandle) -> Result<()> {
     }
     let _claim = Claim;
 
-    if status(&app) == ModelStatus::Ready {
+    let data_dir = app.path().app_data_dir().context("no app data directory")?;
+    if status(&data_dir) == ModelStatus::Ready {
         emit(
             &app,
             ModelProgress {
@@ -102,7 +100,7 @@ pub async fn download(app: AppHandle) -> Result<()> {
         return Ok(());
     }
 
-    let result = download_inner(&app).await;
+    let result = download_inner(&app, &data_dir).await;
     if let Err(e) = &result {
         emit(
             &app,
@@ -118,8 +116,8 @@ pub async fn download(app: AppHandle) -> Result<()> {
     result
 }
 
-async fn download_inner(app: &AppHandle) -> Result<()> {
-    let dir = models_dir(app)?;
+async fn download_inner(app: &AppHandle, data_dir: &Path) -> Result<()> {
+    let dir = models_dir(data_dir)?;
     let archive_path = dir.join("parakeet-v3-int8.tar.gz.part");
 
     let response = reqwest::get(MODEL_URL)
@@ -188,7 +186,7 @@ async fn download_inner(app: &AppHandle) -> Result<()> {
 
     remove_leftover(&archive_path);
 
-    if status(app) != ModelStatus::Ready {
+    if status(data_dir) != ModelStatus::Ready {
         return Err(anyhow!(
             "the archive unpacked but `{MODEL_DIR_NAME}/{MODEL_SENTINEL}` is missing"
         ));

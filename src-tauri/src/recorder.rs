@@ -8,8 +8,10 @@
 //! immediately; the microphone opens, the model runs, and the file is written on
 //! a worker, with `RECORDER_STATE` events narrating the transitions.
 
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -18,8 +20,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::audio_toolkit::constants::{MAX_CAPTURE_SAMPLES, SAMPLE_RATE};
 use crate::audio_toolkit::vad::{
-    SileroVad, SmoothedVad, VAD_HANGOVER_FRAMES, VAD_ONSET_FRAMES, VAD_PREFILL_FRAMES,
-    VAD_THRESHOLD,
+    SileroVad, SmoothedVad, VoiceActivityDetector, VAD_HANGOVER_FRAMES, VAD_ONSET_FRAMES,
+    VAD_PREFILL_FRAMES, VAD_THRESHOLD,
 };
 use crate::audio_toolkit::AudioRecorder;
 use crate::settings::SettingsState;
@@ -29,7 +31,7 @@ use crate::{hooks, models, note, sounds, tray};
 /// Captures shorter than this are treated as a slip of the finger — a
 /// double-tap on the shortcut, a key held for a moment — and dropped without
 /// running the model.
-const MIN_CAPTURE_SAMPLES: usize = SAMPLE_RATE as usize / 4; // 250 ms
+pub const MIN_CAPTURE_SAMPLES: usize = SAMPLE_RATE as usize / 4; // 250 ms
 const _: () = assert!(
     MIN_CAPTURE_SAMPLES < MAX_CAPTURE_SAMPLES,
     "the shortest capture worth keeping must fit inside the longest allowed"
@@ -43,15 +45,21 @@ const MIC_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct Recorder {
     app: AppHandle,
+    /// `<app-data>`: where the model and the hooks live.
+    data_dir: PathBuf,
+    /// The bundled Silero weights.
+    vad_path: PathBuf,
     state: Mutex<RecorderState>,
     audio: Mutex<Option<AudioRecorder>>,
     transcriber: Arc<Transcriber>,
 }
 
 impl Recorder {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(app: AppHandle, data_dir: PathBuf, vad_path: PathBuf) -> Self {
         Self {
             app,
+            data_dir,
+            vad_path,
             state: Mutex::new(RecorderState::Idle),
             audio: Mutex::new(None),
             transcriber: Arc::new(Transcriber::new()),
@@ -129,7 +137,7 @@ impl Recorder {
         if self.state() != RecorderState::Idle {
             return;
         }
-        if models::status(&self.app) != ModelStatus::Ready {
+        if models::status(&self.data_dir) != ModelStatus::Ready {
             self.fail(
                 RecorderState::Idle,
                 &anyhow!(
@@ -162,16 +170,7 @@ impl Recorder {
             .map_err(|e| anyhow!("audio mutex poisoned: {e}"))?;
 
         if guard.is_none() {
-            let vad_path = models::vad_path(&self.app)?;
-            let silero = SileroVad::new(&vad_path, VAD_THRESHOLD)
-                .map_err(|e| anyhow!("could not start voice detection: {e}"))?;
-            let smoothed = SmoothedVad::new(
-                Box::new(silero),
-                VAD_PREFILL_FRAMES,
-                VAD_HANGOVER_FRAMES,
-                VAD_ONSET_FRAMES,
-            );
-            let recorder = AudioRecorder::new().with_vad(Box::new(smoothed));
+            let recorder = AudioRecorder::new().with_vad(voice_detector(&self.vad_path)?);
             *guard = Some(recorder);
         }
 
@@ -344,7 +343,7 @@ impl Recorder {
             return Ok(());
         }
 
-        let model_dir = models::model_path(&self.app)?;
+        let model_dir = models::model_path(&self.data_dir)?;
         let result = self.transcriber.transcribe(&model_dir, &samples);
         // Scheduled on the error path too: a failed transcription still leaves
         // the model resident.
@@ -354,27 +353,65 @@ impl Recorder {
         let settings = self.settings_snapshot();
         let path = note::resolve(&settings.note_path);
 
-        // The one place a user's own code gets a say before the file changes.
-        let Some(text) = hooks::on_capture(&self.app, &path, &text) else {
-            log::info!("talkie: the on-capture hook dropped the capture; nothing written");
-            return Ok(());
-        };
-
-        let written = note::prepend(&path, &text)
-            .with_context(|| format!("could not write to the notes file at {}", path.display()))?;
-
-        if written {
-            log::info!(
+        match land(&self.data_dir, &path, &text)? {
+            // The app outlives any hook, so `after-capture` finishes on its own.
+            Landed::Written { text, after: _ } => log::info!(
                 "talkie: appended {} characters to {}",
                 text.len(),
                 path.display()
-            );
-            hooks::after_capture(&self.app, &path, &text);
-        } else {
-            log::info!("talkie: the model heard nothing; nothing written");
+            ),
+            Landed::Dropped => {
+                log::info!("talkie: the on-capture hook dropped the capture; nothing written");
+            }
+            Landed::Blank => log::info!("talkie: the model heard nothing; nothing written"),
         }
         Ok(())
     }
+}
+
+/// The voice detector every capture runs through: Silero, smoothed so a
+/// capture keeps the breath before a word and the tail after it.
+pub fn voice_detector(vad_path: &Path) -> Result<Box<dyn VoiceActivityDetector>> {
+    let silero = SileroVad::new(vad_path, VAD_THRESHOLD)
+        .map_err(|e| anyhow!("could not start voice detection: {e}"))?;
+    Ok(Box::new(SmoothedVad::new(
+        Box::new(silero),
+        VAD_PREFILL_FRAMES,
+        VAD_HANGOVER_FRAMES,
+        VAD_ONSET_FRAMES,
+    )))
+}
+
+/// What became of a transcript on its way into the notes file.
+pub enum Landed {
+    /// The entry is in the file. `text` is what was written, which the
+    /// `on-capture` hook may have changed, and `after` is the `after-capture`
+    /// hook still running, if one is installed.
+    Written {
+        text: String,
+        after: Option<JoinHandle<()>>,
+    },
+    /// The `on-capture` hook printed nothing: it said there was nothing to keep.
+    Dropped,
+    /// The transcript was blank, so the file was not touched.
+    Blank,
+}
+
+/// The tail of every capture, whoever made it — the shortcut or `Talkie
+/// capture` on the command line: the `on-capture` hook, the write, then the
+/// `after-capture` hook.
+pub fn land(data_dir: &Path, path: &Path, text: &str) -> Result<Landed> {
+    // The one place a user's own code gets a say before the file changes.
+    let Some(text) = hooks::on_capture(data_dir, path, text) else {
+        return Ok(Landed::Dropped);
+    };
+    let written = note::prepend(path, &text)
+        .with_context(|| format!("could not write to the notes file at {}", path.display()))?;
+    if !written {
+        return Ok(Landed::Blank);
+    }
+    let after = hooks::after_capture(data_dir, path, &text);
+    Ok(Landed::Written { text, after })
 }
 
 /// Post a failure as a system notification, asking for permission the first
