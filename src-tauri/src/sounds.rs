@@ -1,9 +1,10 @@
-//! The start and stop chimes.
+//! The start, stop and notepad chimes.
 //!
-//! In a flow with no window and no paste, these two tones are the entire
-//! feedback channel: one says "I'm listening", the other says "I've stopped".
-//! They are synthesised rather than shipped as assets — two sine blips with a
-//! short fade need no files, no licences, and no attribution.
+//! In a flow with no window and no paste, these tones are the entire feedback
+//! channel: one says "I'm listening", one says "I've stopped", and a third says
+//! "that was a double-tap, not a capture". They are synthesised rather than
+//! shipped as assets — sine blips with a short fade need no files, no
+//! licences, and no attribution.
 
 use std::time::Duration;
 
@@ -14,6 +15,10 @@ use rodio::OutputStreamBuilder;
 const START_TONES: [f32; 2] = [660.0, 880.0];
 /// The same interval falling: recording has stopped.
 const STOP_TONES: [f32; 2] = [880.0, 660.0];
+/// One note, higher than either chime: the double-tap went to the notepad and
+/// the capture it started was thrown away. A single note so it cannot be
+/// mistaken for a start or a stop.
+const NOTEPAD_TONES: [f32; 1] = [1320.0];
 
 const TONE_MS: u64 = 70;
 /// Slack after the last tone before the output is closed, so the fade-out
@@ -33,6 +38,10 @@ pub fn play_start() {
 
 pub fn play_stop() {
     play(&STOP_TONES);
+}
+
+pub fn play_notepad() {
+    play(&NOTEPAD_TONES);
 }
 
 /// Play a sequence of tones on a detached thread.
