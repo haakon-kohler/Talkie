@@ -325,7 +325,9 @@ windows are usually all closed when a capture fails.
 
 ## Menu bar
 
-Tooltip (`tray.tooltip`) — *live*. Reflects the capture state.
+Tooltip (`tray.tooltip`) — *live*. Reflects the capture state. "Talkie" here
+and in `tray.quit` is the product name, which reads "Talkie Nightly" in a
+nightly build.
 
 | ID | Text |
 | --- | --- |

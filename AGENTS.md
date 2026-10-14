@@ -33,6 +33,10 @@ machine has been uninstalled.)
 cargo tauri dev            # run the app (spawns `trunk serve` itself)
 cargo tauri build          # bundle a .app/.dmg
 
+# the same two as Talkie Nightly (see "Channels" below)
+cargo tauri dev   --config src-tauri/tauri.nightly.conf.json
+cargo tauri build --config src-tauri/tauri.nightly.conf.json
+
 trunk build                # frontend only
 trunk serve                # frontend only, on :1420
 
@@ -53,6 +57,9 @@ This is a known, accepted cost of the zero-node stance.
 Cargo.toml        workspace: shared · ui · src-tauri   (release profile and clippy lints live here)
 clippy.toml       what tests may do that the code may not; product names doc_markdown accepts
 Trunk.toml        builds ui/index.html → dist/
+.github/workflows/
+  ci.yml            fmt, both clippy runs and the tests, on a Mac, for every PR and push
+  release.yml       a push to nightly publishes Talkie Nightly; a vX.Y.Z tag publishes Talkie
 shared/           serde types + command/event names used by BOTH sides
   src/document.rs   the document contract as code: where a capture goes, how a save merges
 ui/               Leptos CSR crate (wasm32)
@@ -81,7 +88,42 @@ src-tauri/src/
   windows.rs        show/hide + the macOS Accessory/Regular Dock dance
   tray.rs           menu-bar item and its menu
   test_support.rs   helpers shared by the host's tests
+src-tauri/tauri.nightly.conf.json   merged over tauri.conf.json: Talkie Nightly's name, identifier, icons
+src-tauri/icons/nightly/            the inverted app icon (dark tile, white mark), from icons/source/*-nightly.svg
 ```
+
+## Channels: stable and nightly
+
+Talkie ships the way T3 Code does: **Talkie** is the stable app, **Talkie
+Nightly** carries what is new, and anyone can install either or both.
+
+- **Two long-lived branches, never more.** `nightly` is where work lands;
+  `main` is stable. A feature branches off `nightly`, its PR targets
+  `nightly`, and the branch is deleted once merged. `main` only ever moves by
+  fast-forwarding to a commit that is already on `nightly`
+  (`git push origin <sha>:main`), so stable never runs code nightly users have
+  not. A fix for stable goes the same way: into `nightly` first, then promoted.
+- **Releasing.** Every push to `nightly` publishes a GitHub prerelease,
+  `v<version>-nightly.<yyyymmdd>.<run>`. Stable is a tag: promote `main`, then
+  push `vX.Y.Z` on it; `release.yml` refuses a tag that is not on both
+  branches. Afterwards, bump `version` in `tauri.conf.json` on `nightly` so the
+  nightlies name the release they lead up to.
+- **The channel is chosen at build time, not in code.**
+  `tauri.nightly.conf.json` changes the product name, the bundle identifier
+  (`com.haakonkohler.talkie.nightly`) and the icons, and nothing else. The
+  code reads its name from `package_info()`, so the tray says "Talkie Nightly"
+  without an `if`. Do not branch on the channel in Rust; if nightly needs to
+  behave differently, it is not ready for nightly.
+- **Everything keyed on the identifier is separate.** Nightly has its own
+  settings, its own copy of the model (one more download), its own
+  `debug.log` and hooks folder under
+  `~/Library/Application Support/com.haakonkohler.talkie.nightly/`, its own
+  single-instance socket, and its own Accessibility and Microphone grants
+  (`tccutil reset … com.haakonkohler.talkie.nightly`). The one thing they
+  share by default is `~/Documents/Talkie/talkie.md`, which is safe because
+  the editor is never the only writer anyway. The single-instance guard does
+  not stop one of each from running: with the same shortcut both would
+  capture every utterance, so give them different shortcuts or quit one.
 
 ## Rules that are easy to get wrong
 

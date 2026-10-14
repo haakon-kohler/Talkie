@@ -9,8 +9,6 @@ pub mod document;
 
 use serde::{Deserialize, Serialize};
 
-pub const APP_NAME: &str = "Talkie";
-
 /// Default global shortcut: ⌃⌥Space, in `handy-keys` syntax.
 ///
 /// Side-agnostic on purpose — a default should fire from either hand. A

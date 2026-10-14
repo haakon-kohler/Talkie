@@ -357,7 +357,7 @@ fn notify(app: &AppHandle, message: &str) {
 
     if let Err(e) = notification
         .builder()
-        .title(talkie_shared::APP_NAME)
+        .title(&app.package_info().name)
         .body(message)
         .show()
     {
