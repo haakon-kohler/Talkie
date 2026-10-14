@@ -44,9 +44,11 @@ Talkie capture --wav <file.wav> [--note <path>]   # transcribe, then add it as a
 Talkie capture --text <text> [--note <path>]      # add text as if it were a capture
 ```
 
-`Talkie` is `/Applications/Talkie.app/Contents/MacOS/Talkie`. A capture runs the
-`on-capture` and `after-capture` hooks and lands in the notes file from
-settings unless `--note` names another. Stdout carries only the transcript or
+`Talkie` is `/Applications/Talkie.app/Contents/MacOS/Talkie`, or
+`"/Applications/Talkie Nightly.app/Contents/MacOS/Talkie Nightly"`, which uses
+Nightly's model, hooks and notes file. A capture runs the `on-capture` and
+`after-capture` hooks and lands in the notes file from settings unless
+`--note` names another. Stdout carries only the transcript or
 what was written; the exit code is 0 on success, 1 on failure and 2 on a
 malformed command.
 

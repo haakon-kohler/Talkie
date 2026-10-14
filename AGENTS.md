@@ -218,7 +218,9 @@ Nightly** carries what is new, and anyone can install either or both.
   answered before the single-instance guard, so they run beside a live Talkie
   and never install the event tap — keep anything added there that way, and
   keep the microphone out of it: a terminal cannot hold the grant. The model
-  has to be installed already. On Linux, `XDG_DATA_HOME=/tmp/x` gives them a
+  has to be installed already. They read the app-data directory of the
+  identifier they were built with, so Talkie Nightly's binary uses Nightly's
+  settings, model and hooks. On Linux, `XDG_DATA_HOME=/tmp/x` gives them a
   scratch app-data directory instead of the real one.
 - **`data-wasm-opt-params` in `ui/index.html` is load-bearing.** Release builds
   only: `wasm-opt` 123 validates its input against MVP unless told otherwise and
