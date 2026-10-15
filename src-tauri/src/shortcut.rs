@@ -25,6 +25,14 @@
 //! The two modes are exclusive by construction: while the recorder is listening
 //! the bound hotkey is unregistered, so pressing your own shortcut to re-record
 //! it doesn't also start a capture.
+//!
+//! ## Double-tap
+//!
+//! Two quick taps of the shortcut show or hide the notepad. Waiting to see
+//! whether a second tap is coming would put that wait in front of every
+//! capture, so the first tap is never held back: it starts recording at once,
+//! and a second tap inside `DOUBLE_TAP_WINDOW` throws that capture away before
+//! anything is transcribed. `Taps` decides; `Engine::perform` acts.
 
 use std::str::FromStr;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -33,11 +41,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use handy_keys::{Hotkey, HotkeyId, HotkeyManager, HotkeyState, Key, KeyboardListener};
-use talkie_shared::{events, ShortcutCapture};
+use talkie_shared::{events, RecorderState, ShortcutCapture, WindowLabel};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::recorder::Recorder;
 use crate::settings::SettingsState;
+use crate::{sounds, windows};
 
 /// How long the engine thread waits for a command before looking at the
 /// keyboard again. Also the worst-case latency from a keypress to a capture
@@ -66,6 +75,23 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// one interval bounds it. The check is one XPC round trip to tccd, so it
 /// stays rare.
 const TRUST_CHECK: Duration = Duration::from_secs(5);
+
+/// Press to press: how soon a second press must follow the first to count as
+/// a double-tap. A toggle-mode capture shorter than this is impossible — it
+/// becomes the double-tap instead — but one that short is below the
+/// recorder's 250 ms floor and would have been dropped anyway.
+const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(400);
+
+/// Push-to-talk only: a hold shorter than this is a tap, and its release is
+/// held back until the double-tap window closes. Matches the recorder's
+/// minimum capture, so a tap that gets no second press is discarded rather
+/// than transcribed — it would have been too short to keep anyway, and
+/// recording on through the wait must not turn it into a capture.
+const TAP_HOLD: Duration = Duration::from_millis(250);
+const _: () = assert!(
+    TAP_HOLD.as_millis() < DOUBLE_TAP_WINDOW.as_millis(),
+    "a tap has to end before the window for the next one closes"
+);
 
 /// What the rest of the app can ask the engine thread to do.
 enum Cmd {
@@ -179,6 +205,7 @@ struct Engine {
     listener: Option<KeyboardListener>,
     /// When the Accessibility grant was last confirmed. See `TRUST_CHECK`.
     trust_checked: Instant,
+    taps: Taps,
 }
 
 fn run(app: AppHandle, rx: &Receiver<Cmd>) {
@@ -189,6 +216,7 @@ fn run(app: AppHandle, rx: &Receiver<Cmd>) {
         bound: None,
         listener: None,
         trust_checked: Instant::now(),
+        taps: Taps::default(),
     };
 
     loop {
@@ -200,6 +228,7 @@ fn run(app: AppHandle, rx: &Receiver<Cmd>) {
         }
 
         engine.check_trust();
+        engine.expire_tap();
         engine.poll();
         engine.check_invariants();
     }
@@ -381,11 +410,73 @@ impl Engine {
         let Some(manager) = self.manager.as_ref() else {
             return;
         };
+        let mut events = Vec::new();
         while let Some(event) = manager.try_recv() {
             if Some(event.id) == self.bound {
-                dispatch(&self.app, event.state);
+                events.push(event.state);
             }
         }
+        for state in events {
+            self.dispatch(state);
+        }
+    }
+
+    /// What a press or release of the bound shortcut means. `Taps` decides;
+    /// this hands off.
+    fn dispatch(&mut self, state: HotkeyState) {
+        let settings = self.settings();
+        let mode = Mode {
+            push_to_talk: settings.push_to_talk,
+            double_tap: settings.double_tap_notepad,
+        };
+        // A window that closed between ticks still has to close before the
+        // event is read, or a held-back release would be lost behind it.
+        self.expire_tap();
+        let recording = self.app.state::<Arc<Recorder>>().state() == RecorderState::Recording;
+        let action = self.taps.on_event(mode, state, recording, Instant::now());
+        self.perform(action);
+    }
+
+    /// Close the double-tap window once it has run out.
+    fn expire_tap(&mut self) {
+        if let Some(action) = self.taps.expire(Instant::now()) {
+            self.perform(action);
+        }
+    }
+
+    fn perform(&self, action: Action) {
+        let recorder = self.app.state::<Arc<Recorder>>();
+        match action {
+            Action::Nothing => {}
+            Action::Start => recorder.start(),
+            Action::Stop => recorder.stop(),
+            Action::Toggle => recorder.toggle(),
+            // The tap's stop chime, late by the length of the window. The
+            // capture itself was too short to keep.
+            Action::Abandon => {
+                if recorder.cancel() && self.settings().play_sounds {
+                    sounds::play_stop();
+                }
+            }
+            Action::Notepad => {
+                recorder.cancel();
+                if self.settings().play_sounds {
+                    sounds::play_notepad();
+                }
+                if let Err(e) = windows::toggle(&self.app, WindowLabel::Editor) {
+                    log::warn!("talkie: the double-tap could not open the notepad: {e}");
+                }
+            }
+        }
+    }
+
+    fn settings(&self) -> talkie_shared::Settings {
+        self.app
+            .state::<SettingsState>()
+            .0
+            .lock()
+            .expect("settings mutex poisoned")
+            .clone()
     }
 
     fn poll_recording(&mut self) {
@@ -408,25 +499,115 @@ impl Engine {
     }
 }
 
-/// What a press of the bound shortcut means. Kept tiny on purpose: it decides
-/// and hands off.
-fn dispatch(app: &AppHandle, state: HotkeyState) {
-    let push_to_talk = {
-        let settings = app.state::<SettingsState>();
-        let guard = settings.0.lock().expect("settings mutex poisoned");
-        guard.push_to_talk
-    };
+/// The two settings that decide what a key edge means.
+#[derive(Debug, Clone, Copy)]
+struct Mode {
+    push_to_talk: bool,
+    double_tap: bool,
+}
 
-    let recorder = app.state::<Arc<Recorder>>();
+/// What the engine does with a key edge, once `Taps` has decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Nothing,
+    Start,
+    Stop,
+    Toggle,
+    /// A push-to-talk tap that no second tap followed: discard it, stop chime.
+    Abandon,
+    /// The second tap: discard the capture the first one started, notepad chime,
+    /// show or hide the notepad.
+    Notepad,
+}
 
-    match (push_to_talk, state) {
-        // Hold to talk: the key's own edges are the start and the stop.
-        (true, HotkeyState::Pressed) => recorder.start(),
-        (true, HotkeyState::Released) => recorder.stop(),
-        // Press to start, press again to stop. The release does nothing, or the
-        // capture would end the instant it began.
-        (false, HotkeyState::Pressed) => recorder.toggle(),
-        (false, HotkeyState::Released) => {}
+/// The shortcut's recent history, as much of it as a double-tap needs.
+///
+/// Pure: it is handed the time and the recorder's state rather than reading
+/// them, so the tests below can drive it press by press.
+#[derive(Debug, Default)]
+struct Taps {
+    /// When the press that could be a double-tap's first half landed.
+    armed: Option<Instant>,
+    /// When the current press went down, to tell a tap from a hold.
+    pressed: Option<Instant>,
+    /// Push-to-talk: a tap's release, held back until the window closes.
+    held_release: bool,
+    /// The second tap's release belongs to the double-tap and stops nothing.
+    swallow_release: bool,
+}
+
+impl Taps {
+    fn on_event(
+        &mut self,
+        mode: Mode,
+        state: HotkeyState,
+        recording: bool,
+        now: Instant,
+    ) -> Action {
+        // `armed` is only ever set with double-tap on, so a setting switched
+        // off mid-window still lets that one double-tap finish.
+        if state == HotkeyState::Pressed && self.armed_at(now) {
+            self.armed = None;
+            self.held_release = false;
+            // In toggle mode the release does nothing anyway.
+            self.swallow_release = mode.push_to_talk;
+            return Action::Notepad;
+        }
+
+        match (mode.push_to_talk, state) {
+            // Hold to talk: the key's own edges are the start and the stop.
+            (true, HotkeyState::Pressed) => {
+                debug_assert!(
+                    !self.held_release,
+                    "a held-back release outlived its window"
+                );
+                self.pressed = Some(now);
+                self.armed = mode.double_tap.then_some(now);
+                Action::Start
+            }
+            (true, HotkeyState::Released) => {
+                if std::mem::take(&mut self.swallow_release) {
+                    return Action::Nothing;
+                }
+                let tapped = self
+                    .pressed
+                    .take()
+                    .is_some_and(|at| now.duration_since(at) < TAP_HOLD);
+                if tapped && self.armed.is_some() {
+                    self.held_release = true;
+                    return Action::Nothing;
+                }
+                // A hold is a capture, never the first half of a double-tap.
+                self.armed = None;
+                Action::Stop
+            }
+            // Press to start, press again to stop. The release does nothing,
+            // or the capture would end the instant it began. A press that
+            // stops a capture cannot begin a double-tap.
+            (false, HotkeyState::Pressed) => {
+                // Switched out of push-to-talk mid-window: the tap's capture
+                // is now a toggle capture, and this press is what stops it.
+                self.held_release = false;
+                self.armed = (mode.double_tap && !recording).then_some(now);
+                Action::Toggle
+            }
+            (false, HotkeyState::Released) => Action::Nothing,
+        }
+    }
+
+    /// Close the window if it has run out. A tap still waiting on it was a
+    /// tap and nothing more.
+    fn expire(&mut self, now: Instant) -> Option<Action> {
+        if self.armed.is_none() || self.armed_at(now) {
+            return None;
+        }
+        self.armed = None;
+        std::mem::take(&mut self.held_release).then_some(Action::Abandon)
+    }
+
+    fn armed_at(&self, now: Instant) -> bool {
+        self.armed
+            .is_some_and(|at| now.duration_since(at) < DOUBLE_TAP_WINDOW)
     }
 }
 
@@ -494,5 +675,163 @@ mod tests {
     #[test]
     fn a_lone_modifier_is_bindable_now() {
         assert!(validate("Command").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod tap_tests {
+    use std::time::{Duration, Instant};
+
+    use handy_keys::HotkeyState::{Pressed, Released};
+
+    use super::{Action, Mode, Taps, DOUBLE_TAP_WINDOW, TAP_HOLD};
+
+    const HOLD: Mode = Mode {
+        push_to_talk: true,
+        double_tap: true,
+    };
+    const TOGGLE: Mode = Mode {
+        push_to_talk: false,
+        double_tap: true,
+    };
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    #[test]
+    fn the_first_press_starts_at_once() {
+        let mut taps = Taps::default();
+        assert_eq!(
+            taps.on_event(HOLD, Pressed, false, Instant::now()),
+            Action::Start
+        );
+    }
+
+    #[test]
+    fn a_hold_is_an_ordinary_capture() {
+        let t = Instant::now();
+        let mut taps = Taps::default();
+        taps.on_event(HOLD, Pressed, false, t);
+        assert_eq!(
+            taps.on_event(HOLD, Released, true, t + ms(1500)),
+            Action::Stop
+        );
+        assert_eq!(taps.expire(t + ms(2000)), None);
+    }
+
+    #[test]
+    fn a_double_tap_opens_the_notepad_and_its_release_stops_nothing() {
+        let t = Instant::now();
+        let mut taps = Taps::default();
+        taps.on_event(HOLD, Pressed, false, t);
+        assert_eq!(
+            taps.on_event(HOLD, Released, true, t + ms(80)),
+            Action::Nothing
+        );
+        assert_eq!(
+            taps.on_event(HOLD, Pressed, true, t + ms(200)),
+            Action::Notepad
+        );
+        assert_eq!(
+            taps.on_event(HOLD, Released, false, t + ms(280)),
+            Action::Nothing
+        );
+        assert_eq!(taps.expire(t + ms(1000)), None);
+    }
+
+    #[test]
+    fn a_lone_tap_is_abandoned_when_the_window_closes() {
+        let t = Instant::now();
+        let mut taps = Taps::default();
+        taps.on_event(HOLD, Pressed, false, t);
+        taps.on_event(HOLD, Released, true, t + ms(80));
+        assert_eq!(
+            taps.expire(
+                t + DOUBLE_TAP_WINDOW
+                    .checked_sub(ms(1))
+                    .expect("the window is longer than a millisecond")
+            ),
+            None
+        );
+        assert_eq!(taps.expire(t + DOUBLE_TAP_WINDOW), Some(Action::Abandon));
+        assert_eq!(taps.expire(t + DOUBLE_TAP_WINDOW + ms(10)), None);
+    }
+
+    #[test]
+    fn a_short_hold_followed_by_a_press_is_not_a_double_tap() {
+        let t = Instant::now();
+        let mut taps = Taps::default();
+        taps.on_event(HOLD, Pressed, false, t);
+        assert_eq!(
+            taps.on_event(HOLD, Released, true, t + TAP_HOLD),
+            Action::Stop
+        );
+        assert_eq!(
+            taps.on_event(HOLD, Pressed, false, t + ms(350)),
+            Action::Start
+        );
+    }
+
+    #[test]
+    fn a_slow_second_press_starts_a_new_capture() {
+        let t = Instant::now();
+        let mut taps = Taps::default();
+        taps.on_event(HOLD, Pressed, false, t);
+        taps.on_event(HOLD, Released, true, t + ms(80));
+        assert_eq!(taps.expire(t + DOUBLE_TAP_WINDOW), Some(Action::Abandon));
+        assert_eq!(
+            taps.on_event(HOLD, Pressed, false, t + DOUBLE_TAP_WINDOW + ms(50)),
+            Action::Start
+        );
+    }
+
+    #[test]
+    fn switched_off_it_is_plain_push_to_talk() {
+        let off = Mode {
+            push_to_talk: true,
+            double_tap: false,
+        };
+        let t = Instant::now();
+        let mut taps = Taps::default();
+        assert_eq!(taps.on_event(off, Pressed, false, t), Action::Start);
+        assert_eq!(taps.on_event(off, Released, true, t + ms(80)), Action::Stop);
+        assert_eq!(
+            taps.on_event(off, Pressed, false, t + ms(200)),
+            Action::Start
+        );
+    }
+
+    #[test]
+    fn toggle_mode_double_tap() {
+        let t = Instant::now();
+        let mut taps = Taps::default();
+        assert_eq!(taps.on_event(TOGGLE, Pressed, false, t), Action::Toggle);
+        assert_eq!(
+            taps.on_event(TOGGLE, Released, true, t + ms(80)),
+            Action::Nothing
+        );
+        assert_eq!(
+            taps.on_event(TOGGLE, Pressed, true, t + ms(200)),
+            Action::Notepad
+        );
+        assert_eq!(taps.expire(t + ms(1000)), None);
+    }
+
+    #[test]
+    fn toggle_mode_stop_press_does_not_arm() {
+        let t = Instant::now();
+        let mut taps = Taps::default();
+        taps.on_event(TOGGLE, Pressed, false, t);
+        // Recording for a while, then stopped, then pressed again quickly:
+        // that is a stop and a new start, not a double-tap.
+        assert_eq!(
+            taps.on_event(TOGGLE, Pressed, true, t + ms(5000)),
+            Action::Toggle
+        );
+        assert_eq!(
+            taps.on_event(TOGGLE, Pressed, false, t + ms(5200)),
+            Action::Toggle
+        );
     }
 }

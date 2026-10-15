@@ -139,6 +139,10 @@ pub struct Settings {
     /// because your finger is on the key, and letting go cannot leave a
     /// recording running by accident.
     pub push_to_talk: bool,
+    /// Double-tapping the shortcut shows or hides the notepad. The first tap
+    /// still starts a capture the instant it lands; the second throws that
+    /// capture away, so a single press never waits on the double-tap window.
+    pub double_tap_notepad: bool,
     /// Start/stop chimes — the only feedback in an otherwise silent flow.
     pub play_sounds: bool,
     /// Input device name; `None` follows the system default.
@@ -153,6 +157,7 @@ impl Default for Settings {
             note_path: String::new(),
             shortcut: DEFAULT_SHORTCUT.to_string(),
             push_to_talk: true,
+            double_tap_notepad: true,
             play_sounds: true,
             microphone: None,
             launch_at_login: false,

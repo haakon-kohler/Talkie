@@ -34,6 +34,22 @@ pub fn hide<R: Runtime>(app: &AppHandle<R>, label: WindowLabel) -> Result<(), St
     Ok(())
 }
 
+/// Hide the window if it is on screen and focused; otherwise show and focus it.
+///
+/// "On screen" alone is not enough: a notepad left open behind another app
+/// should come forward on the first try, not vanish.
+pub fn toggle<R: Runtime>(app: &AppHandle<R>, label: WindowLabel) -> Result<(), String> {
+    let window = app
+        .get_webview_window(label.as_str())
+        .ok_or_else(|| format!("no window labelled `{}`", label.as_str()))?;
+    let in_front = window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false);
+    if in_front {
+        hide(app, label)
+    } else {
+        show(app, label)
+    }
+}
+
 /// Drop back to Accessory once nothing is on screen. Safe to call anywhere.
 pub fn sync_activation_policy<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(target_os = "macos")]
