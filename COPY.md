@@ -1,14 +1,13 @@
 # Talkie — Copy
 
 Every string a user can see, in one place. **This file is the source of truth for
-prose.** The app currently ships lorem ipsum in the slots marked *(placeholder)*;
-edit the text here, tell me to resync, and I'll copy it into the code.
+prose.** Edit the text here, tell me to resync, and I'll copy it into the code.
 
 Conventions:
 
 - Each string has a stable ID (`onboarding.lede`). The code carries that ID in a
   `// COPY:` comment next to the placeholder, so resyncing is mechanical.
-- **Placeholder** = the app shows lorem ipsum today, waiting on your text.
+- **Placeholder** = waiting on your text.
   **Live** = short functional label, already in the app verbatim; edit here and
   it gets resynced the same way.
 - Don't renumber or rename IDs — that's what makes the resync safe.
@@ -18,7 +17,7 @@ Conventions:
 
 ## Still to write
 
-The slots below are the only ones still showing lorem ipsum or nothing at all.
+The slots below are the only ones still showing a working label or nothing at all.
 Everything else in this file is in the app verbatim.
 
 | ID | Where it shows | Note |
@@ -361,8 +360,7 @@ App name (`bundle.product_name`) — *live*
 
 > Talkie
 
-Short description (`bundle.short_description`) — *live* (shows in Finder, so it
-stays real rather than lorem)
+Short description (`bundle.short_description`) — *live* (shows in Finder)
 
 > The modern notepad.
 

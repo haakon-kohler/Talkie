@@ -435,8 +435,7 @@ button.primary:disabled {
   opacity: 0.5;
 }
 
-/* A titled block inside a page — settings' model section, and whatever M3 adds
-   next to it. */
+/* A titled block inside a page — settings' model section. */
 .section {
   margin-top: 26px;
   padding-top: 18px;

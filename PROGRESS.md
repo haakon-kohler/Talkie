@@ -122,8 +122,8 @@ that becomes an onboarding step and a documented change of stance.
 - Accessibility cannot be granted to the `cargo tauri dev` binary at all: it has
   no `Info.plist` and no bundle id, and as a child of the terminal macOS blames
   the terminal for the request. Adding `target/debug/talkie` to the pane looks
-  like it worked and does nothing. Use `cargo tauri build --debug --bundles app`
-  plus an explicit `codesign -s -`; see AGENTS.md for the incantation.
+  like it worked and does nothing. Use `cargo tauri build --debug --bundles app`;
+  see AGENTS.md.
 - Bundling turned up an unrelated blocker: `trunk build --release` died in
   `wasm-opt` ("error validating input" on `memory.copy`). Fixed with explicit
   feature flags in `ui/index.html`; the release wasm optimises to 450 KB.
@@ -241,11 +241,11 @@ every file written in the old order is one more file with a seam in it.
   the one string that lives outside the Rust and the UI, which is exactly why it
   was overlooked; `COPY.md` says so next to it.
 - One string had no ID: the line the model section shows once the model is
-  installed. Added as `onboarding.model.installed`, still lorem, awaiting text.
+  installed. Added as `onboarding.model.installed`.
 
 ## M3 — Settings & robustness
 
-- [ ] **Bold and italic from the keyboard.** ⌘B / ⌘I wrap the selection (or open
+- [x] **Bold and italic from the keyboard.** ⌘B / ⌘I wrap the selection (or open
       an empty pair at the cursor) and unwrap it again when the selection is
       already wrapped. No toolbar, no menu, no hint in the UI — the shortcuts are
       simply there, the way they are in every other editor. No ⌘U: CommonMark has
@@ -276,8 +276,8 @@ every file written in the old order is one more file with a seam in it.
       insufficient.
 - [x] File location picker — AppKit's own `NSOpenPanel`, no dialog plugin
 - [x] Microphone picker
-- [ ] Model idle-unload timer
-- [ ] Error surfacing beyond the editor's save failure
+- [x] Model idle-unload timer
+- [x] Error surfacing beyond the editor's save failure
 - [x] A real app icon, and template menu-bar icons for idle · recording · transcribing
 
 ### M3 notes
