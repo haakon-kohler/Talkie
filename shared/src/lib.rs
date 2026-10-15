@@ -109,9 +109,7 @@ impl WindowLabel {
     }
 }
 
-/// Where the capture pipeline is right now. Drives the tray icon and, later, the
-/// chimes. Nothing records yet in M0 — this exists so the UI and tray can be
-/// written against the final shape.
+/// Where the capture pipeline is right now. Drives the tray icon.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RecorderState {
