@@ -73,3 +73,10 @@ resampling, and VAD code is ported from Handy (MIT) with its notice retained.
 ## License
 
 PolyForm Noncommercial 1.0.0 — see `LICENSE`. The ported Handy audio code remains MIT.
+
+The speech model Talkie downloads on first run is NVIDIA's
+[Parakeet TDT 0.6B V3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3),
+CC-BY-4.0, in the int8 ONNX export Handy distributes. Talkie mirrors that
+archive unchanged on the
+[`model-parakeet-v3-int8`](https://github.com/haakon-kohler/Talkie/releases/tag/model-parakeet-v3-int8)
+release.

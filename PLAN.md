@@ -12,7 +12,6 @@
 **- stop macOS offering Mic Mode for a few-seconds capture**
 - Obsidian setup and Handy coexistence in `README.md`
 - ad-hoc signed DMG
-- model mirrored off `blob.handy.computer` before distributing
 - notarization
 - hook docs — `hooks.rs` runs `on-capture` and `after-capture` from the app-data `hooks/` folder, nothing tells the user yet; OpenClaw integration goes there
 - Windows / Linux pass
