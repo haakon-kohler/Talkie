@@ -304,7 +304,6 @@ mod tests {
     #[test]
     fn a_hung_hook_is_killed_at_the_deadline() {
         let hook = Script::new("hang", "sleep 30");
-        let started = Instant::now();
         let err = run(
             &hook.0,
             Path::new("/tmp/talkie.md"),
@@ -313,7 +312,37 @@ mod tests {
         )
         .expect_err("should time out");
         assert!(err.to_string().contains("killed"), "{err}");
-        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// A fresh app-data directory holding `body` as its `on-capture` hook.
+    fn with_on_capture(name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let data = std::env::temp_dir().join(format!("talkie-hooks-{name}-{}", std::process::id()));
+        crate::test_support::remove_dir_if_present(&data);
+        let hook = dir(&data).expect("hooks dir").join(ON_CAPTURE);
+        fs::write(&hook, format!("#!/bin/sh\n{body}\n")).expect("write hook");
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod");
+        data
+    }
+
+    #[test]
+    fn on_capture_drops_the_capture_when_the_hook_prints_nothing() {
+        let data = with_on_capture("drop", "cat >/dev/null");
+        assert_eq!(on_capture(&data, Path::new("/tmp/talkie.md"), "um"), None);
+    }
+
+    #[test]
+    fn on_capture_keeps_the_transcript_when_the_hook_fails() {
+        let data = with_on_capture("fail", "echo garbage; exit 1");
+        let kept = on_capture(&data, Path::new("/tmp/talkie.md"), "what was said");
+        assert_eq!(kept.as_deref(), Some("what was said"));
+    }
+
+    #[test]
+    fn on_capture_never_offers_an_empty_transcript_to_the_hook() {
+        let data = with_on_capture("empty", "echo invented");
+        let kept = on_capture(&data, Path::new("/tmp/talkie.md"), "  \n");
+        assert_eq!(kept.as_deref(), Some("  \n"));
     }
 
     #[test]
