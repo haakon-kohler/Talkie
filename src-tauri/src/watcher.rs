@@ -369,22 +369,22 @@ mod tests {
 
     /// The thread behind the old watch can be mid-flurry when the path
     /// changes. Dropping the watcher ends the flurry early, and the thread
-    /// used to read the *old* file and report it after the switch.
+    /// used to read the *old* file and report it after the switch. Re-arming
+    /// retires its generation, so its late read must be refused. Driven
+    /// through `noticed` directly: a real flurry races the re-arm, and a
+    /// report that wins that race is correct, not the bug.
     #[test]
     fn a_rearm_mid_flurry_does_not_report_the_old_file() {
         let (a, b) = two_notes("mid-flurry");
         let watcher = NoteWatcher::new();
-        let old = watching(&watcher, &a);
-
+        // The generation a thread watching A would hold. No real thread: one
+        // could settle before the re-arm and rightly record A.
+        let retired = watcher.seen.lock().unwrap().generation;
         note::write(&a, "A changed\n").unwrap();
-        // Inside SETTLE: the old thread has the event and is draining.
-        std::thread::sleep(SETTLE / 3);
+
         let _new = watching(&watcher, &b);
 
-        assert!(
-            old.recv_timeout(SETTLE * 3).is_err(),
-            "A was reported after the watch moved"
-        );
+        assert!(!noticed(&watcher.seen, retired, &a));
         assert_ne!(watcher.last_seen().as_deref(), Some("A changed\n"));
     }
 }

@@ -339,6 +339,20 @@ fn format_key_name(name: &str) -> String {
 mod tests {
     use super::*;
 
+    /// `parse` ends in a catch-all, so a window added to `as_str` but not to
+    /// `parse` compiles and then cannot route. Extend the list with the enum.
+    #[test]
+    fn window_labels_round_trip() {
+        for label in [
+            WindowLabel::Editor,
+            WindowLabel::Settings,
+            WindowLabel::Onboarding,
+        ] {
+            assert_eq!(WindowLabel::parse(label.as_str()), Some(label));
+        }
+        assert_eq!(WindowLabel::parse("Editor"), None);
+    }
+
     #[test]
     fn formats_the_default_shortcut() {
         assert_eq!(format_shortcut(DEFAULT_SHORTCUT), "⌃⌥Space");
