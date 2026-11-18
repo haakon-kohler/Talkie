@@ -10,10 +10,17 @@ Set up one shortcut to immediately transcribe notes to a markdown file. It can b
 
 Talkie comes in two channels, installable side by side:
 
-- **Talkie** — the stable release. [Latest release](https://github.com/haakon-kohler/Talkie/releases/latest).
+- **Talkie** — the stable release.
+  [Download Talkie.dmg](https://github.com/haakon-kohler/Talkie/releases/latest/download/Talkie.dmg).
 - **Talkie Nightly** — the newest features first, with the inverted icon.
-  Published from the `nightly` branch on every change; look for the
-  prereleases on the [releases page](https://github.com/haakon-kohler/Talkie/releases).
+  Published from the `nightly` branch on every change.
+  [Download Talkie-Nightly.dmg](https://github.com/haakon-kohler/Talkie/releases/download/nightly-latest/Talkie-Nightly.dmg).
+  Only the newest nightly is kept; for an earlier one, build that commit
+  from source (see [Running it](#running-it)).
+
+Both links always point at the newest build of their channel. The builds are
+for Apple silicon only, on macOS 13 or later. There is no Intel build; on an
+Intel Mac, build Talkie from source.
 
 Each keeps its own settings, model and permissions. Both write to
 `~/Documents/Talkie/talkie.md` unless told otherwise, so give them different

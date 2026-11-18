@@ -1,7 +1,9 @@
 # Two channels, the way T3 Code runs them:
 #
-#   nightly  every push to the `nightly` branch publishes "Talkie Nightly"
-#            as a GitHub prerelease, versioned <base>-nightly.<date>.<run>.
+#   nightly  every push to the `nightly` branch rebuilds "Talkie Nightly",
+#            versioned <base>-nightly.<date>.<run>, and replaces the DMG on
+#            the one rolling `nightly-latest` prerelease. Earlier nightlies
+#            are not kept; build the commit from source to go back.
 #   stable   a `v*.*.*` tag publishes "Talkie" as the latest release. The
 #            tagged commit must already be on `nightly` and on `main`, so
 #            stable only ever ships a build nightly users have run.
@@ -61,8 +63,8 @@ jobs:
             {
               echo "channel=nightly"
               echo "version=$version"
-              echo "tag=v$version"
-              echo "name=Talkie Nightly $version"
+              echo "tag=nightly-latest"
+              echo "name=Talkie Nightly"
               echo "overlay=--config src-tauri/tauri.nightly.conf.json"
             } >> "$GITHUB_OUTPUT"
           else
@@ -93,6 +95,7 @@ jobs:
           CHANNEL: ${{ steps.meta.outputs.channel }}
           TAG: ${{ steps.meta.outputs.tag }}
           NAME: ${{ steps.meta.outputs.name }}
+          VERSION: ${{ steps.meta.outputs.version }}
         run: |
           shopt -s nullglob
           dmgs=(target/release/bundle/dmg/*.dmg)
@@ -101,10 +104,17 @@ jobs:
             exit 1
           fi
 
+          # Each channel ships its DMG under a name that never changes, so one
+          # URL always downloads the newest build:
+          #   stable   releases/latest/download/Talkie.dmg
+          #   nightly  releases/download/nightly-latest/Talkie-Nightly.dmg
+          fixed="$(mktemp -d)"
           notes="$(mktemp)"
           if [[ "$CHANNEL" == nightly ]]; then
-            echo "Nightly build of \`${GITHUB_SHA::7}\`: the newest features, not yet promoted to stable." >> "$notes"
+            cp "${dmgs[0]}" "$fixed/Talkie-Nightly.dmg"
+            echo "The newest Talkie Nightly, $VERSION, built from \`${GITHUB_SHA::7}\`: features not yet promoted to stable. Replaced on every push to \`nightly\`." >> "$notes"
           else
+            cp "${dmgs[0]}" "$fixed/Talkie.dmg"
             echo "Stable release." >> "$notes"
           fi
           cat >> "$notes" <<'EOF'
@@ -112,10 +122,26 @@ jobs:
           Apple silicon, macOS 13 or later. The app is ad-hoc signed, not notarized: after the first launch is refused, allow it under System Settings → Privacy & Security → Open Anyway.
           EOF
 
-          if [[ "$CHANNEL" == nightly ]]; then
-            gh release create "$TAG" "${dmgs[@]}" --target "$GITHUB_SHA" \
-              --title "$NAME" --notes-file "$notes" --prerelease --latest=false
-          else
-            gh release create "$TAG" "${dmgs[@]}" --verify-tag \
+          if [[ "$CHANNEL" == stable ]]; then
+            gh release create "$TAG" "${dmgs[@]}" "$fixed/Talkie.dmg" --verify-tag \
               --title "$NAME" --notes-file "$notes" --latest
+            exit 0
+          fi
+
+          # Nightly: one rolling prerelease, since GitHub's /releases/latest
+          # skips prereleases. Its tag moves to this commit and its one asset
+          # is replaced. Not named `nightly`, which would make the tag and the
+          # branch the same ambiguous ref. The concurrency group above
+          # serializes nightly runs, so two never move the tag at once.
+          git_api="repos/$GITHUB_REPOSITORY/git"
+          if gh api "$git_api/ref/tags/$TAG" --silent 2>/dev/null; then
+            gh api -X PATCH "$git_api/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true --silent
+          fi
+          if gh release view "$TAG" --json tagName --jq .tagName >/dev/null 2>&1; then
+            gh release upload "$TAG" "$fixed/Talkie-Nightly.dmg" --clobber
+            gh release edit "$TAG" --title "$NAME" --notes-file "$notes" \
+              --prerelease --latest=false
+          else
+            gh release create "$TAG" "$fixed/Talkie-Nightly.dmg" --target "$GITHUB_SHA" \
+              --title "$NAME" --notes-file "$notes" --prerelease --latest=false
           fi
