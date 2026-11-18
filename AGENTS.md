@@ -239,6 +239,18 @@ Nightly** carries what is new, and anyone can install either or both.
 - **`PROGRESS.md` keeps no backlog.** Track the current milestone and the next
   one. Do not add a "later" section, and do not reinstate one you find deleted —
   deferred work either comes back on its own or was never worth listing.
+- **A test earns its place by catching a bug the compiler cannot.** Before
+  writing one, name the regression it would catch. Test the document
+  contract (`shared/src/document.rs`), `reconcile` and anything that writes
+  `talkie.md`, parsing of files and settings Talkie does not control, hook
+  I/O, and any race you fixed deterministically. Do not test what the types
+  already guarantee, mirror the implementation line by line, assert that a
+  mock was called, check trivial getters or serde round-trips of plain
+  structs, or add a table case that takes a branch another case already
+  covers. Never sleep and hope the timing works out — that is how flakes get
+  in; expose a seam (a channel, an injected clock, an explicit "settled"
+  signal) or leave it untested. If a change makes a test redundant, delete
+  it in the same PR.
 - **Clippy is strict, and every lint is `deny`.** The list is
   `[workspace.lints.clippy]` in the root `Cargo.toml`: all of `pedantic`, plus
   lints picked one at a time against panics (`unwrap_used`, `indexing_slicing`,
