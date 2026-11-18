@@ -22,10 +22,13 @@ use sha2::{Digest, Sha256};
 use talkie_shared::{events, ModelProgress, ModelStatus};
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Handy's bucket. Personal use is fine; mirror this before distributing (see
-/// the risks section of the implementation plan).
-const MODEL_URL: &str = "https://blob.handy.computer/parakeet-v3-int8.tar.gz";
-/// Published digest of the archive, from Handy's model catalog.
+/// Talkie's own mirror of Handy's archive, on a release that holds nothing
+/// else, so installs do not run on Handy's bandwidth. The digest below is what
+/// keeps the host honest: whoever serves the file can break the download but
+/// cannot change the model.
+const MODEL_URL: &str = "https://github.com/haakon-kohler/Talkie/releases/download/model-parakeet-v3-int8/parakeet-v3-int8.tar.gz";
+/// Published digest of the archive, from Handy's model catalog. The mirror is
+/// the same bytes, so the same digest.
 const MODEL_SHA256: &str = "43d37191602727524a7d8c6da0eef11c4ba24320f5b4730f1a2497befc2efa77";
 /// Directory the archive extracts to, and the path `ParakeetModel::load` wants.
 const MODEL_DIR_NAME: &str = "parakeet-tdt-0.6b-v3-int8";
